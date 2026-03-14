@@ -381,11 +381,14 @@ if (file_exists('/var/run/docker.sock')) {
                 <button class="dms-btn dms-btn-sm" onclick="dmsGenerateApiKey()">Generate New Key</button>
             </div>
             <?php if ($config['api_key']): ?>
-            <p class="dms-help">
-                Check-in URL: <code><?= htmlspecialchars($config['external_url']) ?>/plugins/deadman-switch/include/api.php?action=checkin&key=<?= htmlspecialchars($config['api_key']) ?></code>
+            <p class="dms-help" style="margin-top:10px">
+                To check in remotely, send a GET request to the check-in URL from any device, script, or automation (e.g. <code>curl "URL"</code>).
             </p>
             <p class="dms-help">
-                Status URL: <code><?= htmlspecialchars($config['external_url']) ?>/plugins/deadman-switch/include/api.php?action=status&key=<?= htmlspecialchars($config['api_key']) ?></code>
+                Check-in URL: <code><?= htmlspecialchars($config['external_url']) ?>/plugins/deadman-switch/include/api.php?action=checkin&amp;key=<?= htmlspecialchars($config['api_key']) ?></code>
+            </p>
+            <p class="dms-help">
+                Status URL: <code><?= htmlspecialchars($config['external_url']) ?>/plugins/deadman-switch/include/api.php?action=status&amp;key=<?= htmlspecialchars($config['api_key']) ?></code>
             </p>
             <?php endif; ?>
         </div>

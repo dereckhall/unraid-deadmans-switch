@@ -7,7 +7,13 @@ define('DMS_STATE_FILE', DMS_CONFIG_DIR . '/state.json');
 define('DMS_LOG_DIR', DMS_CONFIG_DIR . '/logs');
 define('DMS_LOG_FILE', DMS_LOG_DIR . '/deadman.log');
 define('DMS_PLUGIN_DIR', '/usr/local/emhttp/plugins/deadman-switch');
-define('DMS_VERSION', '2026.03.14');
+define('DMS_VERSION', (function() {
+    $plg = '/boot/config/plugins/deadman-switch.plg';
+    if (file_exists($plg) && preg_match('/version="([^"]+)"/', @file_get_contents($plg, false, null, 0, 512), $m)) {
+        return $m[1];
+    }
+    return 'unknown';
+})());
 
 function dms_ensure_dirs() {
     $dirs = [DMS_CONFIG_DIR, DMS_LOG_DIR];

@@ -398,12 +398,12 @@ function dms_send_uptime_kuma_heartbeat($config, $state) {
         $msg = $days_left !== null ? "{$days_left} days remaining" : 'OK';
     }
 
-    $url = rtrim($uk['push_url'], '?&');
-    $url .= (strpos($url, '?') === false ? '?' : '&');
-    $url .= 'status=' . $uk_status . '&msg=' . urlencode($msg);
-    if ($days_left !== null) {
-        $url .= '&ping=' . urlencode(round($days_left * 24 * 60));
-    }
+    // Replace status/msg/ping values in the pasted Uptime Kuma push URL
+    $url = $uk['push_url'];
+    $ping_val = $days_left !== null ? round($days_left * 24 * 60) : '';
+    $url = preg_replace('/([?&])status=[^&]*/', '${1}status=' . $uk_status, $url);
+    $url = preg_replace('/([?&])msg=[^&]*/', '${1}msg=' . urlencode($msg), $url);
+    $url = preg_replace('/([?&])ping=[^&]*/', '${1}ping=' . urlencode($ping_val), $url);
 
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);

@@ -13,6 +13,9 @@ $action = $_GET['action'] ?? ($_POST['action'] ?? '');
 $key = $_GET['key'] ?? '';
 $token = $_GET['token'] ?? '';
 
+$config = dms_load_config();
+$state = dms_load_state();
+
 switch ($action) {
     case 'health':
         echo json_encode(['status' => 'ok', 'version' => DMS_VERSION]);

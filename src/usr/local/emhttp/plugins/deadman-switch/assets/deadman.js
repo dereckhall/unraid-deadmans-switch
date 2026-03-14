@@ -161,8 +161,8 @@ function dmsGenerateApiKey() {
     if (!confirm('Generate a new API key? The old key will stop working.')) return;
     dmsPost('generate_api_key').done(function(data) {
         if (data.success) {
-            $('#dms-api-key-display').text(data.api_key);
             dmsToast('New API key generated', 'success');
+            setTimeout(function() { location.reload(); }, 500);
         }
     });
 }

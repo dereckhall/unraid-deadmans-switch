@@ -56,8 +56,6 @@ function dms_load_config() {
             'scripts'   => [],
             'docker'    => ['stop' => [], 'remove' => [], 'volumes' => []],
         ],
-        'trusted_contacts'            => [],
-        'max_postponements'           => 3,
         'pause_max_hours'             => 720,
     ];
 
@@ -95,8 +93,6 @@ function dms_load_state() {
         'missed_count'             => 0,
         'last_notification_level'  => null,
         'quick_checkin_tokens'     => [],
-        'trusted_contact_tokens'   => [],
-        'postponements_used'       => 0,
     ];
 
     if (!file_exists(DMS_STATE_FILE)) {
@@ -223,18 +219,6 @@ function dms_use_quick_checkin_token($token, &$state) {
     $state['quick_checkin_tokens'][$token]['used'] = true;
     dms_save_state($state);
     return true;
-}
-
-function dms_create_trusted_contact_token($contact_index, $state) {
-    $token = dms_generate_token(16);
-    $state['trusted_contact_tokens'][$token] = [
-        'contact_index' => $contact_index,
-        'created'       => date('c'),
-        'expires'       => date('c', time() + 86400 * 7),
-        'used'          => false,
-    ];
-    dms_save_state($state);
-    return $token;
 }
 
 function dms_do_checkin($method = 'web') {

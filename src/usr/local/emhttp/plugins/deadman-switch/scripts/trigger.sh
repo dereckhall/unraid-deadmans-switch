@@ -35,37 +35,6 @@ php -r "
     file_put_contents('$STATE_FILE', json_encode(\$state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 "
 
-# Notify trusted contacts
-php -r "
-    require_once '/usr/local/emhttp/plugins/deadman-switch/include/helpers.php';
-    \$config = dms_load_config();
-    \$state = dms_load_state();
-
-    foreach (\$config['trusted_contacts'] as \$i => \$contact) {
-        if (empty(\$contact['webhook_url'])) continue;
-
-        \$message = \$contact['message'] ?: 'Dead Man'\''s Switch has been triggered. The switch owner has not checked in.';
-
-        // Add postpone link if enabled
-        if (\$contact['can_postpone'] ?? false) {
-            \$token = dms_create_trusted_contact_token(\$i, \$state);
-            \$state = dms_load_state(); // reload after token creation
-            \$external_url = rtrim(\$config['external_url'], '/');
-            \$message .= \"\n\nPostpone actions: \" . \$external_url . '/plugins/deadman-switch/include/api.php?action=postpone&token=' . \$token;
-        }
-
-        // Send via webhook (simple POST)
-        \$ch = curl_init(\$contact['webhook_url']);
-        curl_setopt(\$ch, CURLOPT_POST, true);
-        curl_setopt(\$ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-        curl_setopt(\$ch, CURLOPT_POSTFIELDS, json_encode(['content' => \$message, 'text' => \$message]));
-        curl_setopt(\$ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt(\$ch, CURLOPT_TIMEOUT, 10);
-        curl_exec(\$ch);
-        curl_close(\$ch);
-    }
-"
-
 # Read actions from config
 ACTIONS_JSON=$(php -r "\$c = json_decode(file_get_contents('$CONFIG_FILE'), true); echo json_encode(\$c['actions']);")
 

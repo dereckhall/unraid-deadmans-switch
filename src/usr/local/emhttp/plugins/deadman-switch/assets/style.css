@@ -330,25 +330,6 @@
     min-width: 200px;
 }
 
-/* Contact items */
-.dms-contact-item {
-    border: 1px solid #3a3a4a;
-    border-radius: 8px;
-    padding: 16px;
-    margin-bottom: 12px;
-}
-
-.dms-contact-header {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    margin-bottom: 10px;
-}
-
-.dms-contact-header .dms-input {
-    flex: 1;
-}
-
 /* API Key */
 .dms-api-key-section {
     display: flex;
@@ -364,21 +345,6 @@
     color: #ff8c00;
     font-size: 0.9em;
     word-break: break-all;
-}
-
-/* Abort */
-.dms-abort-section {
-    border-color: #f44336;
-}
-
-.dms-abort-form {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-}
-
-.dms-abort-form .dms-input {
-    max-width: 250px;
 }
 
 /* Log viewer */

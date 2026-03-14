@@ -56,7 +56,6 @@ if (file_exists('/var/run/docker.sock')) {
         <button class="dms-tab active" onclick="dmsShowTab('dashboard')">Dashboard</button>
         <button class="dms-tab" onclick="dmsShowTab('notifications')">Notifications</button>
         <button class="dms-tab" onclick="dmsShowTab('actions')">Actions</button>
-        <button class="dms-tab" onclick="dmsShowTab('contacts')">Trusted Contacts</button>
         <button class="dms-tab" onclick="dmsShowTab('settings')">Settings</button>
         <button class="dms-tab" onclick="dmsShowTab('logs')">Logs</button>
     </div>
@@ -338,46 +337,6 @@ if (file_exists('/var/run/docker.sock')) {
             <h3>Dry Run Results</h3>
             <pre id="dms-dry-run-output"></pre>
         </div>
-    </div>
-
-    <!-- TRUSTED CONTACTS TAB -->
-    <div id="dms-tab-contacts" class="dms-tab-content">
-        <div class="dms-section">
-            <h3>Trusted Contacts</h3>
-            <p class="dms-help">People who will be notified when the switch triggers and can optionally postpone actions.</p>
-
-            <div id="dms-contacts-list">
-                <?php foreach ($config['trusted_contacts'] as $i => $contact): ?>
-                <div class="dms-contact-item" data-index="<?= $i ?>">
-                    <div class="dms-contact-header">
-                        <input type="text" class="dms-input dms-contact-name" value="<?= htmlspecialchars($contact['name']) ?>" placeholder="Contact name">
-                        <button class="dms-btn dms-btn-danger dms-btn-sm" onclick="dmsRemoveContact(this)">Remove</button>
-                    </div>
-                    <label>Webhook URL:
-                        <input type="url" class="dms-input dms-contact-webhook" value="<?= htmlspecialchars($contact['webhook_url'] ?? '') ?>" placeholder="Discord/Slack webhook URL for this contact">
-                    </label>
-                    <label>Custom Message:
-                        <textarea class="dms-textarea dms-contact-message" rows="2"><?= htmlspecialchars($contact['message'] ?? '') ?></textarea>
-                    </label>
-                    <label class="dms-toggle">
-                        <input type="checkbox" class="dms-contact-can-postpone" <?= ($contact['can_postpone'] ?? false) ? 'checked' : '' ?>>
-                        <span>Can postpone trigger</span>
-                    </label>
-                </div>
-                <?php endforeach; ?>
-            </div>
-            <button class="dms-btn dms-btn-sm" onclick="dmsAddContact()">+ Add Contact</button>
-        </div>
-
-        <div class="dms-section">
-            <label>Max Postponements:
-                <input type="number" id="cfg-max-postponements" value="<?= $config['max_postponements'] ?>" min="0" max="10" class="dms-input dms-input-sm">
-            </label>
-            <p class="dms-help">Total number of times trusted contacts can postpone the trigger (shared across all contacts).</p>
-            <p class="dms-help">Postponements used: <?= $state['postponements_used'] ?></p>
-        </div>
-
-        <button class="dms-btn dms-btn-primary" onclick="dmsSaveContacts()">Save Contacts</button>
     </div>
 
     <!-- SETTINGS TAB -->

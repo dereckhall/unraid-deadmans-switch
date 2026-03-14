@@ -63,7 +63,6 @@ switch ($action) {
             'warning_level'                            => $warning_level,
             'paused'                                   => $state['paused'],
             'pause_expires'                            => $state['pause_expires'],
-            'trusted_contact_postponements_remaining'  => max(0, $config['max_postponements'] - $state['postponements_used']),
             'configured_actions_count'                 => count($config['actions']['deletions']) + count($config['actions']['scripts']),
             'dry_run'                                  => $config['dry_run'],
             'version'                                  => DMS_VERSION,
@@ -106,47 +105,6 @@ switch ($action) {
         dms_do_checkin('quick_link');
         header('Content-Type: text/html; charset=utf-8');
         echo dms_quick_checkin_page('success');
-        break;
-
-    case 'postpone':
-        if (!$token) {
-            http_response_code(400);
-            echo json_encode(['error' => 'Token required']);
-            break;
-        }
-        if (!isset($state['trusted_contact_tokens'][$token])) {
-            header('Content-Type: text/html; charset=utf-8');
-            echo dms_postpone_page('invalid');
-            break;
-        }
-        $tinfo = $state['trusted_contact_tokens'][$token];
-        if ($tinfo['used'] || strtotime($tinfo['expires']) < time()) {
-            header('Content-Type: text/html; charset=utf-8');
-            echo dms_postpone_page('expired');
-            break;
-        }
-        if ($state['postponements_used'] >= $config['max_postponements']) {
-            header('Content-Type: text/html; charset=utf-8');
-            echo dms_postpone_page('max_reached');
-            break;
-        }
-        if ($_SERVER['REQUEST_METHOD'] === 'GET' && !isset($_GET['confirm'])) {
-            header('Content-Type: text/html; charset=utf-8');
-            echo dms_postpone_page('confirm', $token);
-            break;
-        }
-        // Process postpone - extends deadline by grace period hours
-        $state['trusted_contact_tokens'][$token]['used'] = true;
-        $state['postponements_used']++;
-        $state['grace_period_start'] = null;
-        // Extend last_checkin to push the deadline forward
-        $extension_hours = $config['grace_period_hours'];
-        $current_last = strtotime($state['last_checkin']);
-        $state['last_checkin'] = date('c', $current_last + ($extension_hours * 3600));
-        dms_save_state($state);
-        dms_log("Deadline postponed by trusted contact (index: {$tinfo['contact_index']})");
-        header('Content-Type: text/html; charset=utf-8');
-        echo dms_postpone_page('success');
         break;
 
     // Internal AJAX actions (called from the plugin UI, protected by Unraid auth)
@@ -270,7 +228,7 @@ switch ($action) {
         break;
 }
 
-// HTML page rendering functions (used by quickcheckin and postpone endpoints)
+// HTML page rendering functions (used by quickcheckin endpoint)
 
 function dms_quick_checkin_page($status, $token = '') {
     $confirm_url = '';
@@ -306,57 +264,6 @@ HTML;
                 <h1>$title</h1>
                 <div class="dms-error">This check-in link is invalid or has expired.</div>
                 <p>Please use the Unraid web UI or request a new check-in link.</p>
-            </div>
-HTML;
-            break;
-    }
-
-    return dms_standalone_page($body);
-}
-
-function dms_postpone_page($status, $token = '') {
-    $confirm_url = '';
-    if ($token) {
-        $confirm_url = "?action=postpone&token=" . htmlspecialchars($token) . "&confirm=1";
-    }
-
-    $title = "Dead Man's Switch - Trusted Contact";
-    $body = '';
-
-    switch ($status) {
-        case 'confirm':
-            $body = <<<HTML
-            <div class="dms-card">
-                <h1>$title</h1>
-                <p>You have been designated as a trusted contact. The switch owner has not checked in recently.</p>
-                <p>Click below to postpone the automated actions. This will extend the deadline.</p>
-                <a href="$confirm_url" class="dms-btn dms-btn-warning">POSTPONE ACTIONS</a>
-            </div>
-HTML;
-            break;
-        case 'success':
-            $body = <<<HTML
-            <div class="dms-card">
-                <h1>$title</h1>
-                <div class="dms-success">Deadline has been postponed successfully.</div>
-                <p>The switch owner has been notified.</p>
-            </div>
-HTML;
-            break;
-        case 'invalid':
-        case 'expired':
-            $body = <<<HTML
-            <div class="dms-card">
-                <h1>$title</h1>
-                <div class="dms-error">This link is invalid or has expired.</div>
-            </div>
-HTML;
-            break;
-        case 'max_reached':
-            $body = <<<HTML
-            <div class="dms-card">
-                <h1>$title</h1>
-                <div class="dms-error">Maximum number of postponements has been reached.</div>
             </div>
 HTML;
             break;

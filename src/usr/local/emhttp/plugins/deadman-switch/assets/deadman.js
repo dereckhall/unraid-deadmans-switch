@@ -282,48 +282,6 @@ function dmsRemoveScript(btn) {
     $(btn).closest('.dms-action-item').remove();
 }
 
-// Save contacts
-function dmsSaveContacts() {
-    var contacts = [];
-    $('.dms-contact-item').each(function() {
-        var name = $(this).find('.dms-contact-name').val().trim();
-        if (name) {
-            contacts.push({
-                name: name,
-                webhook_url: $(this).find('.dms-contact-webhook').val().trim(),
-                message: $(this).find('.dms-contact-message').val().trim(),
-                can_postpone: $(this).find('.dms-contact-can-postpone').is(':checked')
-            });
-        }
-    });
-
-    var data = {
-        trusted_contacts: contacts,
-        max_postponements: parseInt($('#cfg-max-postponements').val()) || 3
-    };
-
-    dmsPostJson('save_config', data).done(function(resp) {
-        dmsToast(resp.success ? 'Contacts saved!' : 'Save failed', resp.success ? 'success' : 'error');
-    });
-}
-
-function dmsAddContact() {
-    var html = '<div class="dms-contact-item">' +
-        '<div class="dms-contact-header">' +
-        '<input type="text" class="dms-input dms-contact-name" placeholder="Contact name">' +
-        '<button class="dms-btn dms-btn-danger dms-btn-sm" onclick="dmsRemoveContact(this)">Remove</button>' +
-        '</div>' +
-        '<label>Webhook URL: <input type="url" class="dms-input dms-contact-webhook" placeholder="Discord/Slack webhook URL"></label>' +
-        '<label>Custom Message: <textarea class="dms-textarea dms-contact-message" rows="2"></textarea></label>' +
-        '<label class="dms-toggle"><input type="checkbox" class="dms-contact-can-postpone"><span>Can postpone trigger</span></label>' +
-        '</div>';
-    $('#dms-contacts-list').append(html);
-}
-
-function dmsRemoveContact(btn) {
-    $(btn).closest('.dms-contact-item').remove();
-}
-
 // Dry run
 function dmsDryRun() {
     dmsToast('Running dry test...', 'info');

@@ -128,6 +128,34 @@ function dmsUnpause() {
     });
 }
 
+// Copy text to clipboard
+function dmsCopyText(el) {
+    var text = el.textContent.trim();
+    navigator.clipboard.writeText(text).then(function() {
+        dmsToast('Copied to clipboard', 'success');
+    }).catch(function() {
+        // Fallback for older browsers
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        dmsToast('Copied to clipboard', 'success');
+    });
+}
+
+// Delete API key
+function dmsDeleteApiKey() {
+    if (!confirm('Delete the API key? Any scripts or automations using it will stop working.')) return;
+    dmsPostJson('save_config', { api_key: '' }).done(function(resp) {
+        if (resp.success) {
+            dmsToast('API key deleted', 'info');
+            location.reload();
+        }
+    });
+}
+
 // Generate API key
 function dmsGenerateApiKey() {
     if (!confirm('Generate a new API key? The old key will stop working.')) return;

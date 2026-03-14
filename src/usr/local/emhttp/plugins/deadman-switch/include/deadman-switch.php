@@ -377,16 +377,19 @@ if (file_exists('/var/run/docker.sock')) {
         <div class="dms-section">
             <h3>API Key</h3>
             <div class="dms-api-key-section">
-                <code id="dms-api-key-display"><?= $config['api_key'] ? htmlspecialchars($config['api_key']) : 'No API key generated' ?></code>
+                <code id="dms-api-key-display" class="dms-copyable" onclick="dmsCopyText(this)" title="Click to copy"><?= $config['api_key'] ? htmlspecialchars($config['api_key']) : 'No API key generated' ?></code>
                 <button class="dms-btn dms-btn-sm" onclick="dmsGenerateApiKey()">Generate New Key</button>
+                <?php if ($config['api_key']): ?>
+                <button class="dms-btn dms-btn-danger dms-btn-sm" onclick="dmsDeleteApiKey()">Delete Key</button>
+                <?php endif; ?>
             </div>
             <?php if ($config['api_key']): ?>
             <?php $base = htmlspecialchars($config['external_url']) . '/plugins/deadman-switch/include/api.php'; ?>
             <?php $ekey = htmlspecialchars($config['api_key']); ?>
             <p class="dms-help" style="margin-top:10px">To check in remotely from any device, script, or automation:</p>
-            <pre class="dms-code-block">curl "<?= $base ?>?action=checkin&amp;key=<?= $ekey ?>"</pre>
+            <pre class="dms-code-block dms-copyable" onclick="dmsCopyText(this)" title="Click to copy">curl "<?= $base ?>?action=checkin&key=<?= $ekey ?>"</pre>
             <p class="dms-help">To check status:</p>
-            <pre class="dms-code-block">curl "<?= $base ?>?action=status&amp;key=<?= $ekey ?>"</pre>
+            <pre class="dms-code-block dms-copyable" onclick="dmsCopyText(this)" title="Click to copy">curl "<?= $base ?>?action=status&key=<?= $ekey ?>"</pre>
             <?php else: ?>
             <p class="dms-help" style="margin-top:10px">
                 Generate an API key to enable remote check-ins via <code>curl</code> or any HTTP client.

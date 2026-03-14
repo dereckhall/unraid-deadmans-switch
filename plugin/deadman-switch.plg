@@ -18,7 +18,7 @@
 
 ### 2026.03.14a
 
-Fix webhook test, dry run, pause, and UI bugs
+Fix webhook test, dry run, pause, UI bugs. Add plugin description.
 
 ### 2026.03.14
 
@@ -56,7 +56,7 @@ Download and install the main package
 -->
 <FILE Name="/boot/config/plugins/deadman-switch/deadman-switch-2026.03.14a-noarch-1.txz">
 <URL>https://github.com/dereckhall/unraid-deadmans-switch/releases/download/2026.03.14a/deadman-switch-2026.03.14a-noarch-1.txz</URL>
-<SHA256>812d61e3339620f0259f2305638b2edf9006fe3bbd2440cc542327ced05c4e20</SHA256>
+<SHA256>c8fa07080defbcfabba75126a93681bc71030f255455cf38560cd95f057ef15d</SHA256>
 </FILE>
 
 <FILE Run="/bin/bash">

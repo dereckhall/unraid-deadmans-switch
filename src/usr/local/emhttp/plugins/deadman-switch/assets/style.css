@@ -347,6 +347,19 @@
     word-break: break-all;
 }
 
+/* Code blocks */
+.dms-code-block {
+    background: #0d0d1a;
+    color: #b0b0b0;
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    overflow-x: auto;
+    white-space: nowrap;
+    margin: 6px 0 12px;
+}
+
 /* Log viewer */
 .dms-log-controls {
     display: flex;

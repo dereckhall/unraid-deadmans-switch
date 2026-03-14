@@ -4,7 +4,7 @@
 <PLUGIN
   name="deadman-switch"
   author="Dereck"
-  version="2026.03.14"
+  version="2026.03.14a"
   launch="Settings/deadman-switch"
   pluginURL="https://raw.githubusercontent.com/dereckhall/unraid-deadmans-switch/main/plugin/deadman-switch.plg"
   icon="bomb"
@@ -15,6 +15,10 @@
 
 <CHANGES>
 <![CDATA[
+
+### 2026.03.14a
+
+Fix webhook test, dry run, pause, and UI bugs
 
 ### 2026.03.14
 
@@ -35,7 +39,7 @@ Clean old package versions
 <INLINE>
 <![CDATA[
 # Remove old package versions
-rm -f $(ls /boot/config/plugins/deadman-switch/deadman-switch-*.txz 2>/dev/null | grep -v '2026.03.14')
+rm -f $(ls /boot/config/plugins/deadman-switch/deadman-switch-*.txz 2>/dev/null | grep -v '2026.03.14a')
 
 # Create plugin directory if needed
 mkdir -p /boot/config/plugins/deadman-switch
@@ -50,15 +54,15 @@ PACKAGE INSTALLATION
 Download and install the main package
 ===========================================
 -->
-<FILE Name="/boot/config/plugins/deadman-switch/deadman-switch-2026.03.14-noarch-1.txz">
-<URL>https://github.com/dereckhall/unraid-deadmans-switch/releases/download/2026.03.14/deadman-switch-2026.03.14-noarch-1.txz</URL>
-<SHA256>3c8baee1f636b3c6b1264f7c1c4cb7d3db572e2690eb14ef990451f8e2e8b6f2</SHA256>
+<FILE Name="/boot/config/plugins/deadman-switch/deadman-switch-2026.03.14a-noarch-1.txz">
+<URL>https://github.com/dereckhall/unraid-deadmans-switch/releases/download/2026.03.14a/deadman-switch-2026.03.14a-noarch-1.txz</URL>
+<SHA256>812d61e3339620f0259f2305638b2edf9006fe3bbd2440cc542327ced05c4e20</SHA256>
 </FILE>
 
 <FILE Run="/bin/bash">
 <INLINE>
 <![CDATA[
-upgradepkg --install-new /boot/config/plugins/deadman-switch/deadman-switch-2026.03.14-noarch-1.txz
+upgradepkg --install-new /boot/config/plugins/deadman-switch/deadman-switch-2026.03.14a-noarch-1.txz
 ]]>
 </INLINE>
 </FILE>
@@ -92,7 +96,7 @@ chmod +x /usr/local/emhttp/plugins/deadman-switch/scripts/*.sh 2>/dev/null
 echo ""
 echo "----------------------------------------------------"
 echo " deadman-switch has been installed."
-echo " Version: 2026.03.14"
+echo " Version: 2026.03.14a"
 echo "----------------------------------------------------"
 echo ""
 ]]>

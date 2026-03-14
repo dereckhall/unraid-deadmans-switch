@@ -208,7 +208,7 @@ switch ($action) {
         break;
 
     case 'pause':
-        $hours = intval($_GET['hours'] ?? 24);
+        $hours = intval($_POST['hours'] ?? ($_GET['hours'] ?? 24));
         $max = $config['pause_max_hours'];
         if ($hours > $max) $hours = $max;
         $state['paused'] = true;
@@ -250,7 +250,7 @@ switch ($action) {
         break;
 
     case 'test_webhook':
-        $type = $_GET['type'] ?? '';
+        $type = $_POST['type'] ?? ($_GET['type'] ?? '');
         $result = dms_test_webhook($config, $type);
         echo json_encode($result);
         break;

@@ -154,12 +154,19 @@ function dmsGenerateApiKey() {
     });
 }
 
-// Test webhook
+// Test webhook (saves notification settings first, then tests)
 function dmsTestWebhook(type) {
-    dmsToast('Sending test...', 'info');
-    dmsPost('test_webhook', { type: type }).done(function(data) {
-        dmsToast(data.message || (data.success ? 'Test sent!' : 'Test failed'), data.success ? 'success' : 'error');
-    });
+    dmsToast('Saving settings and sending test...', 'info');
+    dmsSaveNotifications();
+    setTimeout(function() {
+        dmsPost('test_webhook', { type: type }).done(function(data) {
+            dmsToast(data.message || (data.success ? 'Test sent!' : 'Test failed'), data.success ? 'success' : 'error');
+        }).fail(function(xhr) {
+            var msg = 'Request failed';
+            try { msg = JSON.parse(xhr.responseText).error || msg; } catch(e) {}
+            dmsToast(msg, 'error');
+        });
+    }, 500);
 }
 
 // Save notifications
@@ -343,7 +350,13 @@ function dmsDryRun() {
             $('#dms-dry-run-output').text(text);
             $('#dms-dry-run-results').show();
             dmsToast('Dry run complete!', 'success');
+        } else {
+            dmsToast(data.message || data.error || 'Dry run failed', 'error');
         }
+    }).fail(function(xhr) {
+        var msg = 'Request failed';
+        try { msg = JSON.parse(xhr.responseText).error || msg; } catch(e) {}
+        dmsToast(msg, 'error');
     });
 }
 
@@ -372,9 +385,24 @@ function dmsClearLogs() {
     });
 }
 
-// Live countdown timer
+// Initialization
 $(function() {
     if (typeof dmsState === 'undefined') return;
+
+    // Restore saved tab
+    var savedTab = localStorage.getItem('dms-active-tab');
+    if (savedTab) {
+        dmsShowTab(savedTab);
+    }
+
+    // Log filter debounce
+    var debounceTimer;
+    $('#dms-log-filter').on('input', function() {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(dmsLoadLogs, 300);
+    });
+
+    // Live countdown timer
     if (!dmsState.armed || !dmsState.remaining || dmsState.paused) return;
 
     var countdownEl = $('#dms-countdown-value');
@@ -413,17 +441,4 @@ $(function() {
             countdownEl.css('color', '#ff9800');
         }
     }, 1000);
-
-    // Restore saved tab
-    var savedTab = localStorage.getItem('dms-active-tab');
-    if (savedTab) {
-        dmsShowTab(savedTab);
-    }
-
-    // Log filter debounce
-    var debounceTimer;
-    $('#dms-log-filter').on('input', function() {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(dmsLoadLogs, 300);
-    });
 });

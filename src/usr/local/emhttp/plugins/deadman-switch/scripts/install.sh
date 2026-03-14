@@ -41,4 +41,10 @@ if [ -f "$CONFIG_DIR/config.json" ]; then
     fi
 fi
 
+# Log the install
+php -r "
+    require_once '$PLUGIN_DIR/include/helpers.php';
+    dms_log('Plugin installed/updated - version ' . DMS_VERSION);
+"
+
 echo "Dead Man's Switch plugin installed successfully."

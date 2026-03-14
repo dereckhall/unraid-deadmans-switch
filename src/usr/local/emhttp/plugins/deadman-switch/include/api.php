@@ -46,7 +46,7 @@ switch ($action) {
             http_response_code(503);
         } elseif (in_array($warning_level, ['critical', 'last_chance'])) {
             http_response_code(429);
-        } elseif ($elapsed_pct >= $config['monitoring_warning_pct']) {
+        } elseif ($elapsed_pct >= 75) {
             http_response_code(299);
         }
         // else 200
@@ -147,22 +147,6 @@ switch ($action) {
         dms_log("Deadline postponed by trusted contact (index: {$tinfo['contact_index']})");
         header('Content-Type: text/html; charset=utf-8');
         echo dms_postpone_page('success');
-        break;
-
-    case 'abort':
-        $code = $_GET['code'] ?? ($_POST['code'] ?? '');
-        if (!$code || $code !== $config['abort_code']) {
-            http_response_code(403);
-            echo json_encode(['error' => 'Invalid abort code']);
-            break;
-        }
-        $state['triggered'] = false;
-        $state['trigger_time'] = null;
-        $state['grace_period_start'] = null;
-        $state['armed'] = false;
-        dms_save_state($state);
-        dms_log("ABORT CODE USED - Switch disarmed", 'CRITICAL');
-        echo json_encode(['success' => true, 'message' => 'Switch aborted and disarmed']);
         break;
 
     // Internal AJAX actions (called from the plugin UI, protected by Unraid auth)

@@ -25,12 +25,10 @@ function dms_load_config() {
         'grace_period_hours'          => 48,
         'external_url'                => '',
         'api_key'                     => '',
-        'abort_code'                  => '',
         'dry_run'                     => true,
         'double_miss'                 => false,
         'has_completed_dry_run'       => false,
         'cron_interval_minutes'       => 60,
-        'monitoring_warning_pct'      => 50,
         'warning_thresholds'          => [
             'reminder'    => 50,
             'warning'     => 75,
@@ -39,12 +37,12 @@ function dms_load_config() {
         ],
         'webhooks'                    => [
             'discord'   => ['enabled' => false, 'url' => ''],
-            'telegram'  => ['enabled' => false, 'token' => '', 'chat_id' => ''],
-            'slack'     => ['enabled' => false, 'url' => ''],
-            'pushover'  => ['enabled' => false, 'user_key' => '', 'app_token' => ''],
-            'gotify'    => ['enabled' => false, 'url' => '', 'token' => ''],
-            'ntfy'      => ['enabled' => false, 'url' => '', 'topic' => ''],
             'custom'    => ['enabled' => false, 'url' => '', 'method' => 'POST', 'body_template' => ''],
+        ],
+        'uptime_kuma'                 => [
+            'enabled'       => false,
+            'push_url'      => '',
+            'warning_days'  => 7,
         ],
         'message_template'            => "Dead Man's Switch: {{status}}\nTime remaining: {{days_remaining}} days ({{hours_remaining}} hours)\nLast check-in: {{last_checkin}}\nCheck in now: {{checkin_link}}",
         'actions'                     => [
@@ -337,59 +335,6 @@ function dms_send_webhook($type, $webhook_config, $message) {
             curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['content' => $message]));
             break;
 
-        case 'telegram':
-            $url = "https://api.telegram.org/bot{$webhook_config['token']}/sendMessage";
-            curl_setopt($ch, CURLOPT_URL, $url);
-            curl_setopt($ch, CURLOPT_POST, true);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
-                'chat_id'    => $webhook_config['chat_id'],
-                'text'       => $message,
-                'parse_mode' => 'HTML',
-            ]));
-            break;
-
-        case 'slack':
-            curl_setopt($ch, CURLOPT_URL, $webhook_config['url']);
-            curl_setopt($ch, CURLOPT_POST, true);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['text' => $message]));
-            break;
-
-        case 'pushover':
-            curl_setopt($ch, CURLOPT_URL, 'https://api.pushover.net/1/messages.json');
-            curl_setopt($ch, CURLOPT_POST, true);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, [
-                'token'   => $webhook_config['app_token'],
-                'user'    => $webhook_config['user_key'],
-                'message' => $message,
-                'title'   => "Dead Man's Switch",
-            ]);
-            break;
-
-        case 'gotify':
-            $url = rtrim($webhook_config['url'], '/') . '/message?token=' . urlencode($webhook_config['token']);
-            curl_setopt($ch, CURLOPT_URL, $url);
-            curl_setopt($ch, CURLOPT_POST, true);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
-                'title'   => "Dead Man's Switch",
-                'message' => $message,
-                'priority' => 8,
-            ]));
-            break;
-
-        case 'ntfy':
-            $url = rtrim($webhook_config['url'], '/') . '/' . $webhook_config['topic'];
-            curl_setopt($ch, CURLOPT_URL, $url);
-            curl_setopt($ch, CURLOPT_POST, true);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $message);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                'Title: Dead Man\'s Switch',
-                'Priority: high',
-            ]);
-            break;
-
         case 'custom':
             curl_setopt($ch, CURLOPT_URL, $webhook_config['url']);
             $body = $webhook_config['body_template'] ?: $message;
@@ -431,6 +376,56 @@ function dms_test_webhook($config, $type) {
     $result = dms_send_webhook($type, $webhooks[$type], $message);
     dms_log("Test webhook sent: $type - " . ($result['success'] ? 'OK' : 'FAILED: ' . $result['message']));
     return $result;
+}
+
+function dms_send_uptime_kuma_heartbeat($config, $state) {
+    $uk = $config['uptime_kuma'];
+    if (!$uk['enabled'] || empty($uk['push_url'])) return;
+
+    $remaining = dms_time_remaining($config, $state);
+    $days_left = $remaining !== null ? round($remaining / 86400, 1) : null;
+    $warning_days = $uk['warning_days'] ?? 7;
+    $status = dms_get_status($config, $state);
+
+    // Determine up/down status for Uptime Kuma
+    if (!$state['armed']) {
+        $uk_status = 'up';
+        $msg = 'Disarmed';
+    } elseif ($state['paused']) {
+        $uk_status = 'up';
+        $msg = 'Paused';
+    } elseif ($state['triggered']) {
+        $uk_status = 'down';
+        $msg = 'TRIGGERED';
+    } elseif ($remaining !== null && $remaining <= 0) {
+        $uk_status = 'down';
+        $msg = 'Grace period active';
+    } elseif ($days_left !== null && $days_left <= $warning_days) {
+        $uk_status = 'down';
+        $msg = "{$days_left} days remaining - check in needed";
+    } else {
+        $uk_status = 'up';
+        $msg = $days_left !== null ? "{$days_left} days remaining" : 'OK';
+    }
+
+    $url = rtrim($uk['push_url'], '?&');
+    $url .= (strpos($url, '?') === false ? '?' : '&');
+    $url .= 'status=' . $uk_status . '&msg=' . urlencode($msg);
+    if ($days_left !== null) {
+        $url .= '&ping=' . urlencode(round($days_left * 24 * 60));
+    }
+
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    $response = curl_exec($ch);
+    $error = curl_error($ch);
+    curl_close($ch);
+
+    if ($error) {
+        dms_log("Uptime Kuma heartbeat failed: $error", 'WARN');
+    }
 }
 
 function dms_execute_dry_run($config) {

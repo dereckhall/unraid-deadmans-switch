@@ -155,17 +155,6 @@ if (file_exists('/var/run/docker.sock')) {
                 </tbody>
             </table>
         </div>
-
-        <!-- Abort Code -->
-        <?php if ($state['armed'] || $status === 'grace_period'): ?>
-        <div class="dms-section dms-abort-section">
-            <h3>Emergency Abort</h3>
-            <div class="dms-abort-form">
-                <input type="text" id="dms-abort-code" placeholder="Enter abort code" class="dms-input">
-                <button class="dms-btn dms-btn-danger" onclick="dmsAbort()">ABORT</button>
-            </div>
-        </div>
-        <?php endif; ?>
     </div>
 
     <!-- NOTIFICATIONS TAB -->
@@ -195,7 +184,7 @@ if (file_exists('/var/run/docker.sock')) {
             <textarea id="cfg-message-template" class="dms-textarea" rows="4"><?= htmlspecialchars($config['message_template']) ?></textarea>
         </div>
 
-        <!-- Webhook Configurations -->
+        <!-- Discord -->
         <div class="dms-section">
             <h3>Discord</h3>
             <div class="dms-webhook-config">
@@ -210,88 +199,7 @@ if (file_exists('/var/run/docker.sock')) {
             </div>
         </div>
 
-        <div class="dms-section">
-            <h3>Telegram</h3>
-            <div class="dms-webhook-config">
-                <label class="dms-toggle">
-                    <input type="checkbox" id="cfg-wh-telegram-enabled" <?= $config['webhooks']['telegram']['enabled'] ? 'checked' : '' ?>>
-                    <span>Enable Telegram notifications</span>
-                </label>
-                <label>Bot Token:
-                    <input type="text" id="cfg-wh-telegram-token" value="<?= htmlspecialchars($config['webhooks']['telegram']['token']) ?>" class="dms-input" placeholder="123456:ABC-DEF...">
-                </label>
-                <label>Chat ID:
-                    <input type="text" id="cfg-wh-telegram-chat_id" value="<?= htmlspecialchars($config['webhooks']['telegram']['chat_id']) ?>" class="dms-input" placeholder="-1001234567890">
-                </label>
-                <button class="dms-btn dms-btn-sm" onclick="dmsTestWebhook('telegram')">Test</button>
-            </div>
-        </div>
-
-        <div class="dms-section">
-            <h3>Slack</h3>
-            <div class="dms-webhook-config">
-                <label class="dms-toggle">
-                    <input type="checkbox" id="cfg-wh-slack-enabled" <?= $config['webhooks']['slack']['enabled'] ? 'checked' : '' ?>>
-                    <span>Enable Slack notifications</span>
-                </label>
-                <label>Webhook URL:
-                    <input type="url" id="cfg-wh-slack-url" value="<?= htmlspecialchars($config['webhooks']['slack']['url']) ?>" class="dms-input" placeholder="https://hooks.slack.com/services/...">
-                </label>
-                <button class="dms-btn dms-btn-sm" onclick="dmsTestWebhook('slack')">Test</button>
-            </div>
-        </div>
-
-        <div class="dms-section">
-            <h3>Pushover</h3>
-            <div class="dms-webhook-config">
-                <label class="dms-toggle">
-                    <input type="checkbox" id="cfg-wh-pushover-enabled" <?= $config['webhooks']['pushover']['enabled'] ? 'checked' : '' ?>>
-                    <span>Enable Pushover notifications</span>
-                </label>
-                <label>User Key:
-                    <input type="text" id="cfg-wh-pushover-user_key" value="<?= htmlspecialchars($config['webhooks']['pushover']['user_key']) ?>" class="dms-input">
-                </label>
-                <label>App Token:
-                    <input type="text" id="cfg-wh-pushover-app_token" value="<?= htmlspecialchars($config['webhooks']['pushover']['app_token']) ?>" class="dms-input">
-                </label>
-                <button class="dms-btn dms-btn-sm" onclick="dmsTestWebhook('pushover')">Test</button>
-            </div>
-        </div>
-
-        <div class="dms-section">
-            <h3>Gotify</h3>
-            <div class="dms-webhook-config">
-                <label class="dms-toggle">
-                    <input type="checkbox" id="cfg-wh-gotify-enabled" <?= $config['webhooks']['gotify']['enabled'] ? 'checked' : '' ?>>
-                    <span>Enable Gotify notifications</span>
-                </label>
-                <label>Server URL:
-                    <input type="url" id="cfg-wh-gotify-url" value="<?= htmlspecialchars($config['webhooks']['gotify']['url']) ?>" class="dms-input" placeholder="https://gotify.example.com">
-                </label>
-                <label>App Token:
-                    <input type="text" id="cfg-wh-gotify-token" value="<?= htmlspecialchars($config['webhooks']['gotify']['token']) ?>" class="dms-input">
-                </label>
-                <button class="dms-btn dms-btn-sm" onclick="dmsTestWebhook('gotify')">Test</button>
-            </div>
-        </div>
-
-        <div class="dms-section">
-            <h3>Ntfy</h3>
-            <div class="dms-webhook-config">
-                <label class="dms-toggle">
-                    <input type="checkbox" id="cfg-wh-ntfy-enabled" <?= $config['webhooks']['ntfy']['enabled'] ? 'checked' : '' ?>>
-                    <span>Enable Ntfy notifications</span>
-                </label>
-                <label>Server URL:
-                    <input type="url" id="cfg-wh-ntfy-url" value="<?= htmlspecialchars($config['webhooks']['ntfy']['url']) ?>" class="dms-input" placeholder="https://ntfy.sh">
-                </label>
-                <label>Topic:
-                    <input type="text" id="cfg-wh-ntfy-topic" value="<?= htmlspecialchars($config['webhooks']['ntfy']['topic']) ?>" class="dms-input" placeholder="my-deadman-switch">
-                </label>
-                <button class="dms-btn dms-btn-sm" onclick="dmsTestWebhook('ntfy')">Test</button>
-            </div>
-        </div>
-
+        <!-- Custom Webhook -->
         <div class="dms-section">
             <h3>Custom Webhook</h3>
             <div class="dms-webhook-config">
@@ -312,6 +220,25 @@ if (file_exists('/var/run/docker.sock')) {
                     <textarea id="cfg-wh-custom-body_template" class="dms-textarea" rows="3"><?= htmlspecialchars($config['webhooks']['custom']['body_template']) ?></textarea>
                 </label>
                 <button class="dms-btn dms-btn-sm" onclick="dmsTestWebhook('custom')">Test</button>
+            </div>
+        </div>
+
+        <!-- Uptime Kuma -->
+        <div class="dms-section">
+            <h3>Uptime Kuma</h3>
+            <p class="dms-help">Push heartbeat to Uptime Kuma on every cron cycle. Reports "down" when fewer than the configured warning days remain.</p>
+            <div class="dms-webhook-config">
+                <label class="dms-toggle">
+                    <input type="checkbox" id="cfg-uk-enabled" <?= $config['uptime_kuma']['enabled'] ? 'checked' : '' ?>>
+                    <span>Enable Uptime Kuma push monitor</span>
+                </label>
+                <label>Push URL:
+                    <input type="url" id="cfg-uk-push-url" value="<?= htmlspecialchars($config['uptime_kuma']['push_url']) ?>" class="dms-input" placeholder="https://uptime-kuma.example.com/api/push/xxxxxxxxxx">
+                </label>
+                <label>Warning Threshold (days):
+                    <input type="number" id="cfg-uk-warning-days" value="<?= $config['uptime_kuma']['warning_days'] ?>" min="1" max="365" class="dms-input dms-input-sm">
+                </label>
+                <p class="dms-help">When fewer than this many days remain, the heartbeat reports "down" so Uptime Kuma alerts you.</p>
             </div>
         </div>
 
@@ -473,9 +400,6 @@ if (file_exists('/var/run/docker.sock')) {
                 <label>Max Pause Duration (hours):
                     <input type="number" id="cfg-pause-max" value="<?= $config['pause_max_hours'] ?>" min="1" max="8760" class="dms-input dms-input-sm">
                 </label>
-                <label>Monitoring Warning Threshold (%):
-                    <input type="number" id="cfg-monitoring-pct" value="<?= $config['monitoring_warning_pct'] ?>" min="1" max="100" class="dms-input dms-input-sm">
-                </label>
             </div>
         </div>
 
@@ -505,14 +429,6 @@ if (file_exists('/var/run/docker.sock')) {
                 Status URL: <code><?= htmlspecialchars($config['external_url']) ?>/plugins/deadman-switch/include/api.php?action=status&key=<?= htmlspecialchars($config['api_key']) ?></code>
             </p>
             <?php endif; ?>
-        </div>
-
-        <div class="dms-section">
-            <h3>Abort Code</h3>
-            <label>Abort Code:
-                <input type="text" id="cfg-abort-code" value="<?= htmlspecialchars($config['abort_code']) ?>" class="dms-input" placeholder="Set an emergency abort code">
-            </label>
-            <p class="dms-help">This code can stop the switch during grace period, separate from Unraid password.</p>
         </div>
 
         <button class="dms-btn dms-btn-primary" onclick="dmsSaveSettings()">Save Settings</button>

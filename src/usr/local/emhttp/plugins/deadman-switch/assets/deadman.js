@@ -128,21 +128,6 @@ function dmsUnpause() {
     });
 }
 
-// Abort
-function dmsAbort() {
-    var code = $('#dms-abort-code').val();
-    if (!code) { dmsToast('Enter abort code', 'error'); return; }
-    if (!confirm('This will ABORT the switch and DISARM it. Are you sure?')) return;
-    dmsPost('abort', { code: code }).done(function(data) {
-        if (data.success) {
-            dmsToast('Switch aborted and disarmed!', 'success');
-            location.reload();
-        } else {
-            dmsToast(data.error || 'Invalid abort code', 'error');
-        }
-    });
-}
-
 // Generate API key
 function dmsGenerateApiKey() {
     if (!confirm('Generate a new API key? The old key will stop working.')) return;
@@ -182,7 +167,7 @@ function dmsSaveNotifications() {
         webhooks: {}
     };
 
-    var types = ['discord', 'telegram', 'slack', 'pushover', 'gotify', 'ntfy', 'custom'];
+    var types = ['discord', 'custom'];
     $.each(types, function(i, type) {
         data.webhooks[type] = { enabled: $('#cfg-wh-' + type + '-enabled').is(':checked') };
         $('[id^="cfg-wh-' + type + '-"]').each(function() {
@@ -191,6 +176,12 @@ function dmsSaveNotifications() {
             data.webhooks[type][field] = $(this).is(':checkbox') ? $(this).is(':checked') : $(this).val();
         });
     });
+
+    data.uptime_kuma = {
+        enabled: $('#cfg-uk-enabled').is(':checked'),
+        push_url: $('#cfg-uk-push-url').val(),
+        warning_days: parseInt($('#cfg-uk-warning-days').val()) || 7
+    };
 
     dmsPostJson('save_config', data).done(function(resp) {
         dmsToast(resp.success ? 'Notification settings saved!' : 'Save failed', resp.success ? 'success' : 'error');
@@ -205,10 +196,8 @@ function dmsSaveSettings() {
         external_url: $('#cfg-external-url').val(),
         cron_interval_minutes: parseInt($('#cfg-cron-interval').val()),
         pause_max_hours: parseInt($('#cfg-pause-max').val()),
-        monitoring_warning_pct: parseInt($('#cfg-monitoring-pct').val()),
         dry_run: $('#cfg-dry-run').is(':checked'),
-        double_miss: $('#cfg-double-miss').is(':checked'),
-        abort_code: $('#cfg-abort-code').val()
+        double_miss: $('#cfg-double-miss').is(':checked')
     };
 
     dmsPostJson('save_config', data).done(function(resp) {

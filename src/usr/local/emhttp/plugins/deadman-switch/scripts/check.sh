@@ -114,6 +114,14 @@ RESULT=$(php -r "
     echo 'STATUS:ok';
 ")
 
+# Send Uptime Kuma heartbeat (runs every cron cycle regardless of state)
+php -r "
+    require_once '/usr/local/emhttp/plugins/deadman-switch/include/helpers.php';
+    \$config = dms_load_config();
+    \$state = dms_load_state();
+    dms_send_uptime_kuma_heartbeat(\$config, \$state);
+" 2>/dev/null
+
 # Parse result
 while IFS= read -r line; do
     ACTION=$(echo "$line" | cut -d: -f1)

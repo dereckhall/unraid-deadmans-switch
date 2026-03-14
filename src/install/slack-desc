@@ -1,0 +1,12 @@
+             |-----handy-ruler------------------------------------------------------|
+deadman-switch: deadman-switch (Dead Man's Switch for Unraid)
+deadman-switch:
+deadman-switch: A plugin that requires periodic check-ins via the Unraid web UI.
+deadman-switch: If the user fails to check in within a configurable time period,
+deadman-switch: the plugin executes automated file deletion, custom scripts,
+deadman-switch: and Docker container actions.
+deadman-switch:
+deadman-switch: Features: webhook notifications, trusted contacts, API endpoint,
+deadman-switch: dashboard widget, dry run mode, grace period, and more.
+deadman-switch:
+deadman-switch: https://github.com/dereckhall/unraid-deadmans-switch

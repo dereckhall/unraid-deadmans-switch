@@ -1,0 +1,466 @@
+/* Dead Man's Switch - Plugin Styles */
+
+#dms-app {
+    max-width: 960px;
+}
+
+/* Tabs */
+.dms-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 20px;
+    border-bottom: 2px solid #3a3a4a;
+    padding-bottom: 0;
+}
+
+.dms-tab {
+    background: transparent;
+    border: none;
+    color: #b0b0b0;
+    padding: 10px 20px;
+    cursor: pointer;
+    font-size: 14px;
+    border-bottom: 3px solid transparent;
+    transition: all 0.2s;
+}
+
+.dms-tab:hover {
+    color: #e0e0e0;
+    background: rgba(255,255,255,0.05);
+}
+
+.dms-tab.active {
+    color: #ff8c00;
+    border-bottom-color: #ff8c00;
+}
+
+.dms-tab-content {
+    display: none;
+}
+
+.dms-tab-content.active {
+    display: block;
+}
+
+/* Status Card */
+.dms-status-card {
+    border: 2px solid #3a3a4a;
+    border-radius: 12px;
+    padding: 30px;
+    margin-bottom: 20px;
+    text-align: center;
+    background: rgba(0,0,0,0.2);
+}
+
+.dms-status-badge {
+    display: inline-block;
+    padding: 8px 24px;
+    border-radius: 20px;
+    color: white;
+    font-weight: bold;
+    font-size: 1.2em;
+    letter-spacing: 1px;
+    margin-bottom: 20px;
+}
+
+/* Countdown */
+.dms-countdown {
+    margin: 20px 0;
+}
+
+.dms-countdown-value {
+    font-size: 3em;
+    font-weight: bold;
+    font-family: 'Courier New', monospace;
+    color: #e0e0e0;
+}
+
+.dms-countdown-label {
+    color: #888;
+    font-size: 0.9em;
+    margin-top: 5px;
+}
+
+.dms-grace .dms-countdown-value {
+    color: #f44336;
+    animation: dms-blink 1s infinite;
+}
+
+@keyframes dms-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Check-in Button */
+.dms-btn-checkin {
+    display: inline-block;
+    padding: 20px 60px;
+    background: #4caf50;
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-size: 1.5em;
+    font-weight: bold;
+    cursor: pointer;
+    margin: 20px 0;
+    transition: all 0.2s;
+    box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
+    letter-spacing: 2px;
+}
+
+.dms-btn-checkin:hover {
+    background: #45a049;
+    transform: scale(1.05);
+    box-shadow: 0 6px 20px rgba(76, 175, 80, 0.5);
+}
+
+.dms-btn-checkin:active {
+    transform: scale(0.98);
+}
+
+.dms-btn-checkin.success {
+    background: #2e7d32;
+}
+
+/* Info Grid */
+.dms-info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-top: 20px;
+    text-align: left;
+}
+
+.dms-info-item {
+    padding: 8px 12px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 6px;
+}
+
+.dms-info-label {
+    color: #888;
+    font-size: 0.85em;
+    display: block;
+}
+
+.dms-info-value {
+    color: #e0e0e0;
+    font-weight: 500;
+}
+
+/* Controls */
+.dms-controls {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-top: 20px;
+}
+
+/* Buttons */
+.dms-btn {
+    padding: 8px 20px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s;
+    color: white;
+}
+
+.dms-btn:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+}
+
+.dms-btn-primary { background: #ff8c00; }
+.dms-btn-danger { background: #f44336; }
+.dms-btn-warning { background: #ff9800; }
+.dms-btn-info { background: #2196f3; }
+.dms-btn-arm { background: #4caf50; font-size: 1.1em; padding: 12px 30px; }
+.dms-btn-sm { padding: 5px 12px; font-size: 12px; }
+
+/* Sections */
+.dms-section {
+    background: rgba(0,0,0,0.15);
+    border: 1px solid #3a3a4a;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 16px;
+}
+
+.dms-section h3 {
+    color: #ff8c00;
+    margin-bottom: 12px;
+    font-size: 1.1em;
+}
+
+.dms-section h4 {
+    color: #b0b0b0;
+    margin: 16px 0 8px;
+    font-size: 0.95em;
+}
+
+.dms-help {
+    color: #888;
+    font-size: 0.85em;
+    margin-bottom: 10px;
+}
+
+.dms-muted {
+    color: #666;
+    font-style: italic;
+}
+
+/* Forms */
+.dms-input {
+    background: #1e1e2e;
+    border: 1px solid #3a3a4a;
+    color: #e0e0e0;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+    width: 100%;
+    max-width: 500px;
+    margin: 4px 0;
+}
+
+.dms-input:focus {
+    border-color: #ff8c00;
+    outline: none;
+}
+
+.dms-input-sm {
+    max-width: 120px;
+}
+
+.dms-textarea {
+    background: #1e1e2e;
+    border: 1px solid #3a3a4a;
+    color: #e0e0e0;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    width: 100%;
+    max-width: 500px;
+    font-family: monospace;
+    resize: vertical;
+}
+
+.dms-textarea:focus {
+    border-color: #ff8c00;
+    outline: none;
+}
+
+.dms-form-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.dms-form-grid label {
+    color: #b0b0b0;
+    font-size: 0.9em;
+}
+
+/* Toggles */
+.dms-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    color: #b0b0b0;
+    cursor: pointer;
+}
+
+.dms-toggle input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: #ff8c00;
+}
+
+/* Tables */
+.dms-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.dms-table th {
+    text-align: left;
+    padding: 8px 12px;
+    color: #888;
+    border-bottom: 1px solid #3a3a4a;
+    font-weight: normal;
+    font-size: 0.85em;
+}
+
+.dms-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    color: #e0e0e0;
+}
+
+/* Webhook configs */
+.dms-webhook-config {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.dms-webhook-config label {
+    color: #b0b0b0;
+    font-size: 0.9em;
+}
+
+/* Action items */
+.dms-action-item {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 8px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 6px;
+    margin-bottom: 8px;
+}
+
+.dms-action-item .dms-input {
+    flex: 1;
+    min-width: 200px;
+}
+
+/* Contact items */
+.dms-contact-item {
+    border: 1px solid #3a3a4a;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+}
+
+.dms-contact-header {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.dms-contact-header .dms-input {
+    flex: 1;
+}
+
+/* API Key */
+.dms-api-key-section {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.dms-api-key-section code {
+    background: #1e1e2e;
+    padding: 8px 16px;
+    border-radius: 6px;
+    color: #ff8c00;
+    font-size: 0.9em;
+    word-break: break-all;
+}
+
+/* Abort */
+.dms-abort-section {
+    border-color: #f44336;
+}
+
+.dms-abort-form {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.dms-abort-form .dms-input {
+    max-width: 250px;
+}
+
+/* Log viewer */
+.dms-log-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.dms-log-viewer {
+    background: #0d0d1a;
+    color: #b0b0b0;
+    padding: 16px;
+    border-radius: 6px;
+    font-family: 'Courier New', monospace;
+    font-size: 12px;
+    max-height: 500px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.5;
+}
+
+/* Actions footer */
+.dms-actions-footer {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+/* Toast notification */
+.dms-toast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    padding: 12px 24px;
+    border-radius: 8px;
+    color: white;
+    font-weight: 500;
+    z-index: 9999;
+    animation: dms-slide-in 0.3s ease;
+    max-width: 400px;
+}
+
+.dms-toast-success { background: #2e7d32; }
+.dms-toast-error { background: #c62828; }
+.dms-toast-info { background: #1565c0; }
+
+@keyframes dms-slide-in {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+/* Mobile responsive */
+@media (max-width: 600px) {
+    .dms-tabs {
+        gap: 2px;
+    }
+    .dms-tab {
+        padding: 8px 10px;
+        font-size: 12px;
+    }
+    .dms-status-card {
+        padding: 20px 15px;
+    }
+    .dms-countdown-value {
+        font-size: 2em;
+    }
+    .dms-btn-checkin {
+        padding: 16px 40px;
+        font-size: 1.2em;
+        width: 100%;
+    }
+    .dms-info-grid {
+        grid-template-columns: 1fr;
+    }
+    .dms-controls {
+        flex-direction: column;
+    }
+    .dms-controls .dms-btn {
+        width: 100%;
+    }
+}

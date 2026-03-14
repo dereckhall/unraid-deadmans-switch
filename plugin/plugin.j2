@@ -1,0 +1,119 @@
+<?xml version='1.0' standalone='yes'?>
+<!DOCTYPE PLUGIN [
+  <!ENTITY name      "{{ name }}">
+  <!ENTITY author    "{{ author }}">
+  <!ENTITY version   "{{ version }}">
+  <!ENTITY launch    "Settings/{{ name }}">
+  <!ENTITY github    "{{ github }}">
+  <!ENTITY pluginURL "https://raw.githubusercontent.com/&github;/main/{{ name }}.plg">
+  <!ENTITY packageURL "{{ package_url }}">
+  <!ENTITY sha256    "{{ sha256 }}">
+  <!ENTITY pluginLOC "/boot/config/plugins/&name;">
+  <!ENTITY emhttpLOC "/usr/local/emhttp/plugins/&name;">
+]>
+
+<PLUGIN name="&name;"
+        author="&author;"
+        version="&version;"
+        launch="&launch;"
+        pluginURL="&pluginURL;"
+        icon="{{ icon }}"
+        min="{{ min_unraid }}"
+        support=""
+        project="https://github.com/&github;"
+        readme="https://github.com/&github;#readme"
+>
+
+<CHANGES>
+{{ changelog }}
+</CHANGES>
+
+<!--
+===========================================
+PRE-INSTALL SCRIPT
+Clean old package versions
+===========================================
+-->
+<FILE Run="/bin/bash">
+<INLINE>
+# Remove old package versions
+rm -f $(ls &pluginLOC;/&name;-*.txz 2>/dev/null | grep -v '&version;')
+
+# Create plugin directory if needed
+mkdir -p &pluginLOC;
+mkdir -p &pluginLOC;/logs
+</INLINE>
+</FILE>
+
+<!--
+===========================================
+PACKAGE INSTALLATION
+Download and install the main package
+===========================================
+-->
+<FILE Name="&pluginLOC;/&name;-&version;.txz" Run="upgradepkg --install-new">
+<URL>&packageURL;</URL>
+<SHA256>&sha256;</SHA256>
+</FILE>
+
+<!--
+===========================================
+CRON JOB
+Runs hourly by default, reconfigurable via settings
+===========================================
+-->
+<FILE Name="/etc/cron.d/&name;">
+<INLINE>
+0 * * * * root &emhttpLOC;/scripts/check.sh &gt;/dev/null 2&gt;&amp;1
+</INLINE>
+</FILE>
+
+<!--
+===========================================
+POST-INSTALL SCRIPT
+===========================================
+-->
+<FILE Run="/bin/bash">
+<INLINE>
+# Set script permissions
+chmod +x &emhttpLOC;/scripts/*.sh 2>/dev/null
+
+# Run install script (initializes config/state if needed)
+&emhttpLOC;/scripts/install.sh
+
+echo ""
+echo "----------------------------------------------------"
+echo " &name; has been installed."
+echo " Version: &version;"
+echo "----------------------------------------------------"
+echo ""
+</INLINE>
+</FILE>
+
+<!--
+===========================================
+REMOVE SCRIPT
+===========================================
+-->
+<FILE Run="/bin/bash" Method="remove">
+<INLINE>
+# Remove cron job
+rm -f /etc/cron.d/&name;
+
+# Remove the package
+removepkg &name;-&version; 2>/dev/null
+
+# Remove plugin files from RAM
+rm -rf &emhttpLOC;
+
+echo ""
+echo "----------------------------------------------------"
+echo " &name; has been removed."
+echo " Config preserved at &pluginLOC;/"
+echo " Delete that directory manually for a clean removal."
+echo "----------------------------------------------------"
+echo ""
+</INLINE>
+</FILE>
+
+</PLUGIN>

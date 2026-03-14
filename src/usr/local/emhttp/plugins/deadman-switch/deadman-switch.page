@@ -1,0 +1,6 @@
+Menu="Utilities"
+Title="Dead Man's Switch"
+Icon="bomb"
+Tabs="false"
+---
+<?php require_once '/usr/local/emhttp/plugins/deadman-switch/include/deadman-switch.php'; ?>

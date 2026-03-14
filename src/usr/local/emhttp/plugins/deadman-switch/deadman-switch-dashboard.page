@@ -1,0 +1,3 @@
+Menu="Dashboard"
+---
+<?php require_once '/usr/local/emhttp/plugins/deadman-switch/include/dashboard-widget.php'; ?>

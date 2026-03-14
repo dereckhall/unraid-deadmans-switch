@@ -380,7 +380,7 @@ if (file_exists('/var/run/docker.sock')) {
                 <code id="dms-api-key-display" class="dms-copyable" onclick="dmsCopyText(this)" title="Click to copy"><?= $config['api_key'] ? htmlspecialchars($config['api_key']) : 'No API key generated' ?></code>
                 <button class="dms-btn dms-btn-sm" onclick="dmsGenerateApiKey()">Generate New Key</button>
                 <?php if ($config['api_key']): ?>
-                <button class="dms-btn dms-btn-danger dms-btn-sm" onclick="dmsDeleteApiKey()">Delete Key</button>
+                <button class="dms-btn dms-btn-sm" onclick="dmsDeleteApiKey()">Delete Key</button>
                 <?php endif; ?>
             </div>
             <?php if ($config['api_key']): ?>

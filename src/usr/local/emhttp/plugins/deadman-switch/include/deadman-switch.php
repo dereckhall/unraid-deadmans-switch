@@ -432,6 +432,8 @@ if (file_exists('/var/run/docker.sock')) {
         </div>
 
         <button class="dms-btn dms-btn-primary" onclick="dmsSaveSettings()">Save Settings</button>
+
+        <p class="dms-help" style="margin-top:20px;text-align:right;color:#666">Dead Man's Switch v<?= DMS_VERSION ?></p>
     </div>
 
     <!-- LOGS TAB -->

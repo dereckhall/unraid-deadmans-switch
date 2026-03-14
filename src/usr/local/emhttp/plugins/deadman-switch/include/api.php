@@ -5,25 +5,13 @@ require_once __DIR__ . '/helpers.php';
 
 header('Content-Type: application/json');
 
+// Unraid's auto_prepend_file handles CSRF validation for all POST requests.
+// It requires csrf_token in $_POST and calls exit() if invalid.
+// By the time we reach this code, CSRF is already validated for POST requests.
+
 $action = $_GET['action'] ?? ($_POST['action'] ?? '');
 $key = $_GET['key'] ?? '';
 $token = $_GET['token'] ?? '';
-
-$config = dms_load_config();
-$state = dms_load_state();
-
-// CSRF validation for internal (web UI) state-changing actions
-$internal_actions = ['web_checkin', 'arm', 'disarm', 'pause', 'unpause',
-    'save_config', 'generate_api_key', 'test_webhook', 'dry_run', 'clear_logs'];
-if (in_array($action, $internal_actions)) {
-    $csrf = $_POST['csrf_token'] ?? ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
-    $sys_var = @parse_ini_file('/var/local/emhttp/var.ini') ?: [];
-    if (empty($csrf) || empty($sys_var['csrf_token']) || $csrf !== $sys_var['csrf_token']) {
-        http_response_code(403);
-        echo json_encode(['error' => 'Invalid CSRF token. Please refresh the page.']);
-        exit;
-    }
-}
 
 switch ($action) {
     case 'health':
@@ -229,8 +217,9 @@ switch ($action) {
         break;
 
     case 'save_config':
-        // Accept POST data for config updates
-        $input = json_decode(file_get_contents('php://input'), true);
+        // Accept JSON config data via json_data form field
+        // (Unraid's CSRF check requires form-encoded POST, so JSON is sent as a field)
+        $input = json_decode($_POST['json_data'] ?? '', true);
         if (!$input) {
             http_response_code(400);
             echo json_encode(['error' => 'Invalid input']);

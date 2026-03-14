@@ -44,7 +44,7 @@ function dmsGet(action, params) {
     return $.getJSON(url);
 }
 
-// API helper - POST requests (includes CSRF token)
+// API helper - POST with form data (Unraid requires csrf_token in $_POST)
 function dmsPost(action, data) {
     data = data || {};
     data.action = action;
@@ -52,16 +52,16 @@ function dmsPost(action, data) {
     return $.post(DMS_API, data, null, 'json');
 }
 
-// API helper - POST with JSON body
+// API helper - POST with JSON payload encoded as form field
+// Unraid's auto_prepend requires csrf_token in $_POST for all POST requests,
+// so we can't send raw JSON body. Instead, send action + csrf_token as form
+// fields and the JSON payload in a 'json_data' field.
 function dmsPostJson(action, body) {
-    return $.ajax({
-        url: DMS_API + '?action=' + encodeURIComponent(action),
-        method: 'POST',
-        contentType: 'application/json',
-        data: JSON.stringify(body),
-        dataType: 'json',
-        headers: { 'X-CSRF-Token': dmsCsrf() }
-    });
+    return $.post(DMS_API, {
+        action: action,
+        csrf_token: dmsCsrf(),
+        json_data: JSON.stringify(body)
+    }, null, 'json');
 }
 
 // Check-in

@@ -1,0 +1,119 @@
+<?xml version='1.0' standalone='yes'?>
+<!DOCTYPE PLUGIN [
+  <!ENTITY name      "deadman-switch">
+  <!ENTITY author    "Dereck">
+  <!ENTITY version   "">
+  <!ENTITY launch    "Settings/deadman-switch">
+  <!ENTITY github    "{'job': 'build', 'ref': 'refs/tags/2026.03.14', 'sha': 'bd5d55de72de2e545c4dc68805c354675dba9430', 'repository': 'dereckhall/unraid-deadmans-switch', 'repository_owner': 'dereckhall', 'repository_owner_id': '14280501', 'repositoryUrl': 'git://github.com/dereckhall/unraid-deadmans-switch.git', 'run_id': '23095528339', 'run_number': '1', 'retention_days': '90', 'run_attempt': '1', 'artifact_cache_size_limit': '10', 'repository_visibility': 'public', 'actor_id': '14280501', 'actor': 'dereckhall', 'workflow': 'Release Unraid Plugin', 'head_ref': '', 'base_ref': '', 'event_name': 'release', 'server_url': 'https://github.com', 'api_url': 'https://api.github.com', 'graphql_url': 'https://api.github.com/graphql', 'ref_name': '2026.03.14', 'ref_protected': False, 'ref_type': 'tag', 'secret_source': 'Actions', 'event': {'action': 'released', 'release': {'assets': [], 'assets_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/releases/297058956/assets', 'author': {'avatar_url': 'https://avatars.githubusercontent.com/u/14280501?v=4', 'events_url': 'https://api.github.com/users/dereckhall/events{/privacy}', 'followers_url': 'https://api.github.com/users/dereckhall/followers', 'following_url': 'https://api.github.com/users/dereckhall/following{/other_user}', 'gists_url': 'https://api.github.com/users/dereckhall/gists{/gist_id}', 'gravatar_id': '', 'html_url': 'https://github.com/dereckhall', 'id': 14280501, 'login': 'dereckhall', 'node_id': 'MDQ6VXNlcjE0MjgwNTAx', 'organizations_url': 'https://api.github.com/users/dereckhall/orgs', 'received_events_url': 'https://api.github.com/users/dereckhall/received_events', 'repos_url': 'https://api.github.com/users/dereckhall/repos', 'site_admin': False, 'starred_url': 'https://api.github.com/users/dereckhall/starred{/owner}{/repo}', 'subscriptions_url': 'https://api.github.com/users/dereckhall/subscriptions', 'type': 'User', 'url': 'https://api.github.com/users/dereckhall', 'user_view_type': 'public'}, 'body': "Initial release - Dead Man's Switch plugin for Unraid\n\n- Periodic check-in system with configurable intervals and warning thresholds\n- Webhook notifications: Discord, Telegram, Slack, Pushover, Gotify, Ntfy, Custom\n- Actions: file/directory deletion (standard + secure shred), custom scripts, Docker\n- Trusted contacts with postponement capability\n- Quick check-in via tokenized links (no login required)\n- API endpoint for external monitoring and check-in\n- Dashboard widget with live countdown timer\n- Safety: dry run mode, grace period, abort code, double-miss option, pause\n- Unraid native notification system integration", 'created_at': '2026-03-14T20:13:34Z', 'draft': False, 'html_url': 'https://github.com/dereckhall/unraid-deadmans-switch/releases/tag/2026.03.14', 'id': 297058956, 'immutable': False, 'name': '2026.03.14', 'node_id': 'RE_kwDORnLAZ84RtMKM', 'prerelease': False, 'published_at': '2026-03-14T20:14:56Z', 'tag_name': '2026.03.14', 'tarball_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/tarball/2026.03.14', 'target_commitish': 'main', 'updated_at': '2026-03-14T20:14:56Z', 'upload_url': 'https://uploads.github.com/repos/dereckhall/unraid-deadmans-switch/releases/297058956/assets{?name,label}', 'url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/releases/297058956', 'zipball_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/zipball/2026.03.14'}, 'repository': {'allow_forking': True, 'archive_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/{archive_format}{/ref}', 'archived': False, 'assignees_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/assignees{/user}', 'blobs_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/git/blobs{/sha}', 'branches_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/branches{/branch}', 'clone_url': 'https://github.com/dereckhall/unraid-deadmans-switch.git', 'collaborators_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/collaborators{/collaborator}', 'comments_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/comments{/number}', 'commits_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/commits{/sha}', 'compare_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/compare/{base}...{head}', 'contents_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/contents/{+path}', 'contributors_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/contributors', 'created_at': '2026-03-14T20:11:29Z', 'default_branch': 'main', 'deployments_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/deployments', 'description': "Dead Man's Switch plugin for Unraid NAS - periodic check-in system with automated actions", 'disabled': False, 'downloads_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/downloads', 'events_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/events', 'fork': False, 'forks': 0, 'forks_count': 0, 'forks_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/forks', 'full_name': 'dereckhall/unraid-deadmans-switch', 'git_commits_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/git/commits{/sha}', 'git_refs_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/git/refs{/sha}', 'git_tags_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/git/tags{/sha}', 'git_url': 'git://github.com/dereckhall/unraid-deadmans-switch.git', 'has_discussions': False, 'has_downloads': True, 'has_issues': True, 'has_pages': False, 'has_projects': True, 'has_pull_requests': True, 'has_wiki': True, 'homepage': None, 'hooks_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/hooks', 'html_url': 'https://github.com/dereckhall/unraid-deadmans-switch', 'id': 1181925479, 'is_template': False, 'issue_comment_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/issues/comments{/number}', 'issue_events_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/issues/events{/number}', 'issues_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/issues{/number}', 'keys_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/keys{/key_id}', 'labels_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/labels{/name}', 'language': 'PHP', 'languages_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/languages', 'license': None, 'merges_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/merges', 'milestones_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/milestones{/number}', 'mirror_url': None, 'name': 'unraid-deadmans-switch', 'node_id': 'R_kgDORnLAZw', 'notifications_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/notifications{?since,all,participating}', 'open_issues': 0, 'open_issues_count': 0, 'owner': {'avatar_url': 'https://avatars.githubusercontent.com/u/14280501?v=4', 'events_url': 'https://api.github.com/users/dereckhall/events{/privacy}', 'followers_url': 'https://api.github.com/users/dereckhall/followers', 'following_url': 'https://api.github.com/users/dereckhall/following{/other_user}', 'gists_url': 'https://api.github.com/users/dereckhall/gists{/gist_id}', 'gravatar_id': '', 'html_url': 'https://github.com/dereckhall', 'id': 14280501, 'login': 'dereckhall', 'node_id': 'MDQ6VXNlcjE0MjgwNTAx', 'organizations_url': 'https://api.github.com/users/dereckhall/orgs', 'received_events_url': 'https://api.github.com/users/dereckhall/received_events', 'repos_url': 'https://api.github.com/users/dereckhall/repos', 'site_admin': False, 'starred_url': 'https://api.github.com/users/dereckhall/starred{/owner}{/repo}', 'subscriptions_url': 'https://api.github.com/users/dereckhall/subscriptions', 'type': 'User', 'url': 'https://api.github.com/users/dereckhall', 'user_view_type': 'public'}, 'private': False, 'pull_request_creation_policy': 'all', 'pulls_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/pulls{/number}', 'pushed_at': '2026-03-14T20:13:51Z', 'releases_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/releases{/id}', 'size': 0, 'ssh_url': 'git@github.com:dereckhall/unraid-deadmans-switch.git', 'stargazers_count': 0, 'stargazers_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/stargazers', 'statuses_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/statuses/{sha}', 'subscribers_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/subscribers', 'subscription_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/subscription', 'svn_url': 'https://github.com/dereckhall/unraid-deadmans-switch', 'tags_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/tags', 'teams_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/teams', 'topics': [], 'trees_url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch/git/trees{/sha}', 'updated_at': '2026-03-14T20:13:54Z', 'url': 'https://api.github.com/repos/dereckhall/unraid-deadmans-switch', 'visibility': 'public', 'watchers': 0, 'watchers_count': 0, 'web_commit_signoff_required': False}, 'sender': {'avatar_url': 'https://avatars.githubusercontent.com/u/14280501?v=4', 'events_url': 'https://api.github.com/users/dereckhall/events{/privacy}', 'followers_url': 'https://api.github.com/users/dereckhall/followers', 'following_url': 'https://api.github.com/users/dereckhall/following{/other_user}', 'gists_url': 'https://api.github.com/users/dereckhall/gists{/gist_id}', 'gravatar_id': '', 'html_url': 'https://github.com/dereckhall', 'id': 14280501, 'login': 'dereckhall', 'node_id': 'MDQ6VXNlcjE0MjgwNTAx', 'organizations_url': 'https://api.github.com/users/dereckhall/orgs', 'received_events_url': 'https://api.github.com/users/dereckhall/received_events', 'repos_url': 'https://api.github.com/users/dereckhall/repos', 'site_admin': False, 'starred_url': 'https://api.github.com/users/dereckhall/starred{/owner}{/repo}', 'subscriptions_url': 'https://api.github.com/users/dereckhall/subscriptions', 'type': 'User', 'url': 'https://api.github.com/users/dereckhall', 'user_view_type': 'public'}}, 'workflow_ref': 'dereckhall/unraid-deadmans-switch/.github/workflows/release.yml@refs/tags/2026.03.14', 'workflow_sha': 'bd5d55de72de2e545c4dc68805c354675dba9430', 'repository_id': '1181925479', 'triggering_actor': 'dereckhall', 'workspace': '/home/runner/work/unraid-deadmans-switch/unraid-deadmans-switch', 'action': '__dkaser_unraid-plugin-release-action', 'event_path': '/home/runner/work/_temp/_github_workflow/event.json', 'action_repository': 'dkaser/unraid-plugin-release-action', 'action_ref': 'v1', 'path': '/home/runner/work/_temp/_runner_file_commands/add_path_11cba307-d1a8-41df-852b-040fda176b91', 'env': '/home/runner/work/_temp/_runner_file_commands/set_env_11cba307-d1a8-41df-852b-040fda176b91', 'step_summary': '/home/runner/work/_temp/_runner_file_commands/step_summary_11cba307-d1a8-41df-852b-040fda176b91', 'state': '/home/runner/work/_temp/_runner_file_commands/save_state_11cba307-d1a8-41df-852b-040fda176b91', 'output': '/home/runner/work/_temp/_runner_file_commands/set_output_11cba307-d1a8-41df-852b-040fda176b91', 'action_path': '/home/runner/work/_actions/dkaser/unraid-plugin-release-action/v1', 'action_status': 'success'}">
+  <!ENTITY pluginURL "https://raw.githubusercontent.com/&github;/main/deadman-switch.plg">
+  <!ENTITY packageURL "">
+  <!ENTITY sha256    "">
+  <!ENTITY pluginLOC "/boot/config/plugins/&name;">
+  <!ENTITY emhttpLOC "/usr/local/emhttp/plugins/&name;">
+]>
+
+<PLUGIN name="&name;"
+        author="&author;"
+        version="&version;"
+        launch="&launch;"
+        pluginURL="&pluginURL;"
+        icon="bomb"
+        min="6.12.0"
+        support=""
+        project="https://github.com/&github;"
+        readme="https://github.com/&github;#readme"
+>
+
+<CHANGES>
+
+</CHANGES>
+
+<!--
+===========================================
+PRE-INSTALL SCRIPT
+Clean old package versions
+===========================================
+-->
+<FILE Run="/bin/bash">
+<INLINE>
+# Remove old package versions
+rm -f $(ls &pluginLOC;/&name;-*.txz 2>/dev/null | grep -v '&version;')
+
+# Create plugin directory if needed
+mkdir -p &pluginLOC;
+mkdir -p &pluginLOC;/logs
+</INLINE>
+</FILE>
+
+<!--
+===========================================
+PACKAGE INSTALLATION
+Download and install the main package
+===========================================
+-->
+<FILE Name="&pluginLOC;/&name;-&version;.txz" Run="upgradepkg --install-new">
+<URL>&packageURL;</URL>
+<SHA256>&sha256;</SHA256>
+</FILE>
+
+<!--
+===========================================
+CRON JOB
+Runs hourly by default, reconfigurable via settings
+===========================================
+-->
+<FILE Name="/etc/cron.d/&name;">
+<INLINE>
+0 * * * * root &emhttpLOC;/scripts/check.sh &gt;/dev/null 2&gt;&amp;1
+</INLINE>
+</FILE>
+
+<!--
+===========================================
+POST-INSTALL SCRIPT
+===========================================
+-->
+<FILE Run="/bin/bash">
+<INLINE>
+# Set script permissions
+chmod +x &emhttpLOC;/scripts/*.sh 2>/dev/null
+
+# Run install script (initializes config/state if needed)
+&emhttpLOC;/scripts/install.sh
+
+echo ""
+echo "----------------------------------------------------"
+echo " &name; has been installed."
+echo " Version: &version;"
+echo "----------------------------------------------------"
+echo ""
+</INLINE>
+</FILE>
+
+<!--
+===========================================
+REMOVE SCRIPT
+===========================================
+-->
+<FILE Run="/bin/bash" Method="remove">
+<INLINE>
+# Remove cron job
+rm -f /etc/cron.d/&name;
+
+# Remove the package
+removepkg &name;-&version; 2>/dev/null
+
+# Remove plugin files from RAM
+rm -rf &emhttpLOC;
+
+echo ""
+echo "----------------------------------------------------"
+echo " &name; has been removed."
+echo " Config preserved at &pluginLOC;/"
+echo " Delete that directory manually for a clean removal."
+echo "----------------------------------------------------"
+echo ""
+</INLINE>
+</FILE>
+
+</PLUGIN>

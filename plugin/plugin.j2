@@ -61,18 +61,6 @@ upgradepkg --install-new /boot/config/plugins/{{ name }}/{{ package_name }}-{{ e
 
 <!--
 ===========================================
-CRON JOB
-Runs hourly by default, reconfigurable via settings
-===========================================
--->
-<FILE Name="/etc/cron.d/{{ name }}">
-<INLINE>
-0 * * * * /usr/local/emhttp/plugins/{{ name }}/scripts/check.sh >> /boot/config/plugins/{{ name }}/logs/cron.log 2>&amp;1
-</INLINE>
-</FILE>
-
-<!--
-===========================================
 POST-INSTALL SCRIPT
 ===========================================
 -->
@@ -81,6 +69,15 @@ POST-INSTALL SCRIPT
 <![CDATA[
 # Set script permissions
 chmod +x /usr/local/emhttp/plugins/{{ name }}/scripts/*.sh 2>/dev/null
+
+# Create cron file in plugin config dir (Unraid's update_cron reads *.cron from here)
+echo "0 * * * * /usr/local/emhttp/plugins/{{ name }}/scripts/check.sh >> /boot/config/plugins/{{ name }}/logs/cron.log 2>&1" > /boot/config/plugins/{{ name }}/{{ name }}.cron
+
+# Remove legacy cron file if present (old versions wrote directly to /etc/cron.d/)
+rm -f /etc/cron.d/{{ name }}
+
+# Regenerate system crontab
+/usr/local/sbin/update_cron
 
 # Run install script (initializes config/state if needed)
 /usr/local/emhttp/plugins/{{ name }}/scripts/install.sh
@@ -103,8 +100,10 @@ REMOVE SCRIPT
 <FILE Run="/bin/bash" Method="remove">
 <INLINE>
 <![CDATA[
-# Remove cron job
+# Remove cron file and regenerate system crontab
+rm -f /boot/config/plugins/{{ name }}/{{ name }}.cron
 rm -f /etc/cron.d/{{ name }}
+/usr/local/sbin/update_cron
 
 # Remove the package
 removepkg {{ package_name }} 2>/dev/null

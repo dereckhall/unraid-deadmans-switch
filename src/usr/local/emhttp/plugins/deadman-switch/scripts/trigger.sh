@@ -27,12 +27,20 @@ else
     log "=== TRIGGER ACTIVATED - EXECUTING ACTIONS ===" "CRITICAL"
 fi
 
-# Mark as triggered
+# Mark as triggered (with file locking)
 php -r "
-    \$state = json_decode(file_get_contents('$STATE_FILE'), true);
-    \$state['triggered'] = true;
-    \$state['trigger_time'] = date('c');
-    file_put_contents('$STATE_FILE', json_encode(\$state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    \$f = fopen('$STATE_FILE', 'c+');
+    if (flock(\$f, LOCK_EX)) {
+        \$state = json_decode(stream_get_contents(\$f), true);
+        \$state['triggered'] = true;
+        \$state['trigger_time'] = date('c');
+        ftruncate(\$f, 0);
+        rewind(\$f);
+        fwrite(\$f, json_encode(\$state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        fflush(\$f);
+        flock(\$f, LOCK_UN);
+    }
+    fclose(\$f);
 "
 
 # Read actions from config
@@ -60,7 +68,7 @@ php -r "
 
     # Expand globs
     shopt -s nullglob
-    for target in $path; do
+    for target in "$path"; do
         if [ ! -e "$target" ]; then
             log "Path not found: $target" "WARN"
             continue
@@ -166,12 +174,20 @@ php -r "
     done
 done
 
-# Update dry run completion flag
+# Update dry run completion flag (with file locking)
 if [ "$DRY_RUN" = "1" ]; then
     php -r "
-        \$c = json_decode(file_get_contents('$CONFIG_FILE'), true);
-        \$c['has_completed_dry_run'] = true;
-        file_put_contents('$CONFIG_FILE', json_encode(\$c, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        \$f = fopen('$CONFIG_FILE', 'c+');
+        if (flock(\$f, LOCK_EX)) {
+            \$c = json_decode(stream_get_contents(\$f), true);
+            \$c['has_completed_dry_run'] = true;
+            ftruncate(\$f, 0);
+            rewind(\$f);
+            fwrite(\$f, json_encode(\$c, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            fflush(\$f);
+            flock(\$f, LOCK_UN);
+        }
+        fclose(\$f);
     "
     log "=== DRY RUN COMPLETE ===" "WARN"
 else

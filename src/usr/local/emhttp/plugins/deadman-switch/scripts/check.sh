@@ -93,8 +93,14 @@ RESULT=$(php -r "
             exit;
         }
 
-        // In grace period - send hourly notifications
-        echo 'NOTIFY:grace:Grace period active. Actions will execute at ' . date('M j, Y g:i A', \$grace_end);
+        // In grace period - only notify once (when grace starts), not every cron cycle
+        if (\$last_level !== 'grace') {
+            \$state['last_notification_level'] = 'grace';
+            dms_save_state(\$state);
+            echo 'NOTIFY:grace:Grace period active. Actions will execute at ' . date('M j, Y g:i A', \$grace_end);
+        } else {
+            echo 'STATUS:grace_already_notified';
+        }
         exit;
     }
 

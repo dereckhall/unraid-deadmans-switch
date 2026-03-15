@@ -74,7 +74,7 @@ function dms_load_config() {
 
 function dms_save_config($config) {
     dms_ensure_dirs();
-    file_put_contents(DMS_CONFIG_FILE, json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    file_put_contents(DMS_CONFIG_FILE, json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX);
 }
 
 function dms_load_state() {
@@ -110,7 +110,7 @@ function dms_load_state() {
 
 function dms_save_state($state) {
     dms_ensure_dirs();
-    file_put_contents(DMS_STATE_FILE, json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    file_put_contents(DMS_STATE_FILE, json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX);
 }
 
 function dms_log($message, $level = 'INFO') {

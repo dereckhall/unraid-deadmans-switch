@@ -39,12 +39,12 @@ $status_labels = [
 $status_color = $status_colors[$status] ?? '#6c757d';
 $status_label = $status_labels[$status] ?? strtoupper($status);
 
-// Docker containers list for action config
+// Docker containers list for action config (with timeout to avoid hanging UI)
 $docker_containers = [];
 $docker_volumes = [];
 if (file_exists('/var/run/docker.sock')) {
-    exec('docker ps -a --format "{{.Names}}" 2>/dev/null', $docker_containers);
-    exec('docker volume ls --format "{{.Name}}" 2>/dev/null', $docker_volumes);
+    exec('timeout 3 docker ps -a --format "{{.Names}}" 2>/dev/null', $docker_containers);
+    exec('timeout 3 docker volume ls --format "{{.Name}}" 2>/dev/null', $docker_volumes);
 }
 ?>
 

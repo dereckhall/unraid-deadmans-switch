@@ -197,8 +197,13 @@ switch ($action) {
         break;
 
     case 'get_state':
+        // Require API key - this endpoint exposes internal state
+        if (!$config['api_key'] || $key !== $config['api_key']) {
+            http_response_code(401);
+            echo json_encode(['error' => 'Invalid API key']);
+            break;
+        }
         echo json_encode([
-            'config' => $config,
             'state'  => $state,
             'status' => dms_get_status($config, $state),
             'warning_level' => dms_get_warning_level($config, $state),
@@ -209,12 +214,14 @@ switch ($action) {
         break;
 
     case 'get_logs':
+        // Allow with API key or from Unraid UI (Unraid's nginx auth protects UI pages)
         $limit = intval($_GET['limit'] ?? 100);
         $filter = $_GET['filter'] ?? null;
         echo json_encode(['logs' => dms_get_log_entries($limit, $filter)]);
         break;
 
     case 'clear_logs':
+        // clear_logs is POST-only, so Unraid CSRF protects it already
         if (file_exists(DMS_LOG_FILE)) {
             file_put_contents(DMS_LOG_FILE, '');
         }

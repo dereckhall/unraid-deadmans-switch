@@ -383,10 +383,14 @@ $(function() {
     var countdownEl = $('#dms-countdown-value');
     if (!countdownEl.length) return;
 
-    var remaining = dmsState.remaining;
+    // Use wall-clock time to avoid drift from setInterval inaccuracy
+    var startTime = Date.now();
+    var startRemaining = dmsState.remaining;
 
-    setInterval(function() {
-        remaining--;
+    function updateCountdown() {
+        var elapsed = Math.floor((Date.now() - startTime) / 1000);
+        var remaining = startRemaining - elapsed;
+
         if (remaining <= 0) {
             countdownEl.text('EXPIRED').css('color', '#f44336');
             return;
@@ -406,14 +410,15 @@ $(function() {
         countdownEl.text(parts.join(' '));
 
         // Color based on urgency
-        var total = dmsState.remaining;
+        var total = startRemaining;
         var pct = ((total - remaining) / total) * 100;
-        if (remaining < 0) {
-            countdownEl.css('color', '#f44336');
-        } else if (pct > 90) {
+        if (pct > 90) {
             countdownEl.css('color', '#f44336');
         } else if (pct > 75) {
             countdownEl.css('color', '#ff9800');
         }
-    }, 1000);
+    }
+
+    updateCountdown();
+    setInterval(updateCountdown, 1000);
 });

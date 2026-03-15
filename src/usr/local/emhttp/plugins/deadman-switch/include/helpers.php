@@ -316,71 +316,76 @@ function dms_build_discord_embed($config, $state) {
     $warning_level = dms_get_warning_level($config, $state);
     $remaining = dms_time_remaining($config, $state);
     $remaining_text = $remaining !== null ? dms_format_time_remaining($remaining) : 'N/A';
-    $days = $remaining ? max(0, round($remaining / 86400, 1)) : 0;
-    $hours = $remaining ? max(0, round($remaining / 3600)) : 0;
 
-    // Color based on severity (Discord uses decimal color values)
-    $colors = [
-        'none'        => 0x4CAF50, // green
-        'reminder'    => 0xFF9800, // orange
-        'warning'     => 0xFF9800, // orange
-        'critical'    => 0xF44336, // red
-        'last_chance' => 0xD32F2F, // dark red
-        'grace'       => 0xB71C1C, // very dark red
-        'triggered'   => 0xB71C1C,
+    // Severity tiers: green (ok), orange (warning), red (critical/grace/triggered)
+    $severity = [
+        'armed_ok'       => 'green',
+        'armed_warning'  => 'orange',
+        'armed_critical' => 'red',
+        'grace_period'   => 'red',
+        'triggered'      => 'red',
+        'paused'         => 'green',
+        'disarmed'       => 'green',
     ];
-    $color = $colors[$warning_level] ?? 0xFF9800;
+    $tier = $severity[$status] ?? 'orange';
 
-    // Status label for title
-    $status_labels = [
-        'armed_ok'       => 'OK',
-        'armed_warning'  => 'WARNING',
-        'armed_critical' => 'CRITICAL',
-        'grace_period'   => 'GRACE PERIOD',
-        'triggered'      => 'TRIGGERED',
-        'paused'         => 'PAUSED',
-        'disarmed'       => 'DISARMED',
+    $tier_colors = ['green' => 0x2ECC71, 'orange' => 0xFF9800, 'red' => 0xE74C3C];
+    $color = $tier_colors[$tier];
+
+    // Emoji matches the sidebar color
+    $tier_emoji = [
+        'green'  => "\xE2\x9C\x85",  // ✅
+        'orange' => "\xE2\x9A\xA0\xEF\xB8\x8F", // ⚠️
+        'red'    => "\xE2\x9D\x8C",  // ❌
     ];
-    $status_label = $status_labels[$status] ?? strtoupper($status);
+    $e = $tier_emoji[$tier];
 
-    // Build fields
+    $headlines = [
+        'armed_ok'       => "$e Dead Man's Switch is OK. $e",
+        'armed_warning'  => "$e Check-in deadline is approaching. $e",
+        'armed_critical' => "$e Check-in urgently needed! $e",
+        'grace_period'   => "$e Deadline missed. Grace period active. $e",
+        'triggered'      => "$e Dead Man's Switch has been TRIGGERED. $e",
+        'paused'         => "$e Dead Man's Switch is paused. $e",
+        'disarmed'       => "$e Dead Man's Switch is disarmed. $e",
+    ];
+    $headline = $headlines[$status] ?? "$e Dead Man's Switch";
+
     $fields = [];
-    $fields[] = ['name' => 'Status', 'value' => $status_label, 'inline' => true];
-    $fields[] = ['name' => 'Time Remaining', 'value' => $remaining_text, 'inline' => true];
 
-    if ($state['last_checkin']) {
-        $fields[] = ['name' => 'Last Check-in', 'value' => date('M j, Y g:i A', strtotime($state['last_checkin'])), 'inline' => false];
+    if ($remaining !== null && $remaining > 0) {
+        $fields[] = ['name' => 'Time Remaining', 'value' => $remaining_text, 'inline' => false];
     }
 
     $deadline = dms_get_deadline($config, $state);
     if ($deadline) {
-        $fields[] = ['name' => 'Deadline', 'value' => date('M j, Y g:i A', $deadline), 'inline' => true];
+        $fields[] = ['name' => 'Deadline', 'value' => date('l, F j, Y \a\t g:i A', $deadline), 'inline' => false];
+    }
+
+    if ($state['last_checkin']) {
+        $fields[] = ['name' => 'Last Check-in', 'value' => date('l, F j, Y \a\t g:i A', strtotime($state['last_checkin'])), 'inline' => false];
     }
 
     if ($status === 'grace_period') {
         $grace_end = dms_get_grace_end($config, $state);
         if ($grace_end) {
-            $fields[] = ['name' => 'Actions Execute At', 'value' => date('M j, Y g:i A', $grace_end), 'inline' => true];
+            $fields[] = ['name' => 'Actions Execute At', 'value' => date('l, F j, Y \a\t g:i A', $grace_end), 'inline' => false];
         }
     }
 
-    // Quick check-in link
     $external_url = rtrim($config['external_url'], '/');
     if ($external_url && $state['armed'] && !$state['triggered']) {
         $token = dms_create_quick_checkin_token($state);
         $checkin_link = $external_url . "/plugins/deadman-switch/include/api.php?action=quickcheckin&token=$token";
-        $fields[] = ['name' => 'Quick Check-in', 'value' => "[Click here to check in]($checkin_link)", 'inline' => false];
+        $fields[] = ['name' => 'Check In', 'value' => "[Click here to check in]($checkin_link)", 'inline' => false];
     }
 
-    $embed = [
-        'title'  => "Dead Man's Switch: $status_label",
-        'color'  => $color,
-        'fields' => $fields,
-        'footer' => ['text' => 'Dead Man\'s Switch v' . DMS_VERSION],
-        'timestamp' => date('c'),
+    return [
+        'description' => $headline,
+        'color'       => $color,
+        'fields'      => $fields,
+        'timestamp'   => date('c'),
     ];
-
-    return $embed;
 }
 
 function dms_send_webhook($type, $webhook_config, $message, $config = null, $state = null) {

@@ -27,8 +27,8 @@ if [ ! -f "$CONFIG_DIR/state.json" ]; then
 fi
 
 # Update cron interval from config if user has customized it
-# (PLG installs default hourly cron, this adjusts if config says otherwise)
-CRON_FILE="/etc/cron.d/deadman-switch"
+# Unraid uses update_cron which reads *.cron files from each plugin's config dir
+CRON_FILE="$CONFIG_DIR/deadman-switch.cron"
 if [ -f "$CONFIG_DIR/config.json" ]; then
     CRON_MINUTES=$(php -r "
         \$config = json_decode(file_get_contents('$CONFIG_DIR/config.json'), true);
@@ -36,9 +36,16 @@ if [ -f "$CONFIG_DIR/config.json" ]; then
     " 2>/dev/null)
     [ -z "$CRON_MINUTES" ] && CRON_MINUTES=60
 
-    if [ "$CRON_MINUTES" != "60" ]; then
-        echo "*/$CRON_MINUTES * * * * root $PLUGIN_DIR/scripts/check.sh >/dev/null 2>&1" > "$CRON_FILE"
+    if [ "$CRON_MINUTES" = "60" ]; then
+        echo "0 * * * * $PLUGIN_DIR/scripts/check.sh >> $CONFIG_DIR/logs/cron.log 2>&1" > "$CRON_FILE"
+    else
+        echo "*/$CRON_MINUTES * * * * $PLUGIN_DIR/scripts/check.sh >> $CONFIG_DIR/logs/cron.log 2>&1" > "$CRON_FILE"
     fi
+
+    # Remove legacy cron file if present
+    rm -f /etc/cron.d/deadman-switch
+
+    /usr/local/sbin/update_cron
 fi
 
 # Log the install

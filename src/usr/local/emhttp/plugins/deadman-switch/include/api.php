@@ -170,8 +170,16 @@ switch ($action) {
             echo json_encode(['error' => 'Invalid input']);
             break;
         }
+        $old_cron = $config['cron_interval_minutes'] ?? 60;
         $config = array_replace_recursive($config, $input);
         dms_save_config($config);
+
+        // Update cron schedule if interval changed
+        $new_cron = $config['cron_interval_minutes'] ?? 60;
+        if ($new_cron != $old_cron) {
+            dms_update_cron($new_cron);
+        }
+
         dms_log("Configuration updated");
         echo json_encode(['success' => true]);
         break;

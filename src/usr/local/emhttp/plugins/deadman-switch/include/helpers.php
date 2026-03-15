@@ -418,6 +418,23 @@ function dms_send_uptime_kuma_heartbeat($config, $state) {
     }
 }
 
+function dms_update_cron($minutes = 60) {
+    $minutes = max(5, min(1440, intval($minutes)));
+    $cron_file = DMS_CONFIG_DIR . '/deadman-switch.cron';
+    $script = DMS_PLUGIN_DIR . '/scripts/check.sh';
+    $log = DMS_CONFIG_DIR . '/logs/cron.log';
+
+    if ($minutes == 60) {
+        $schedule = "0 * * * *";
+    } else {
+        $schedule = "*/$minutes * * * *";
+    }
+
+    file_put_contents($cron_file, "$schedule $script >> $log 2>&1\n", LOCK_EX);
+    exec('/usr/local/sbin/update_cron');
+    dms_log("Cron schedule updated to every $minutes minutes");
+}
+
 function dms_execute_dry_run($config) {
     $results = [];
 

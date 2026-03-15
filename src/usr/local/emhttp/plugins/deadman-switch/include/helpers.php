@@ -387,9 +387,10 @@ function dms_build_discord_embed($config, $state) {
     }
 
     $hostname = gethostname() ?: 'Unraid';
+    $logo_url = 'https://raw.githubusercontent.com/dereckhall/unraid-deadmans-switch/main/src/usr/local/emhttp/plugins/deadman-switch/assets/images/unraid-logo.png';
 
     return [
-        'author'      => ['name' => $hostname],
+        'author'      => ['name' => $hostname, 'icon_url' => $logo_url],
         'description' => $headline,
         'color'       => $color,
         'fields'      => $fields,

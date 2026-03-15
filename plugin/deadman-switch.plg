@@ -4,7 +4,7 @@
 <PLUGIN
   name="deadman-switch"
   author="Dereck"
-  version="2026.03.15f"
+  version="2026.03.15g"
   launch="Settings/deadman-switch"
   pluginURL="https://raw.githubusercontent.com/dereckhall/unraid-deadmans-switch/main/plugin/deadman-switch.plg"
   icon="bomb"
@@ -15,6 +15,10 @@
 
 <CHANGES>
 <![CDATA[
+
+### 2026.03.15g
+
+Fix reminder notification showing green/OK instead of yellow/bell emoji
 
 ### 2026.03.15f
 
@@ -32,10 +36,6 @@ Auto-detect server LAN IP from Unraid's nginx.ini for API URLs. No manual config
 
 Separate api_host config from external_url so curl examples and Discord check-in links point to the direct server address (port 3801), not the reverse proxy.
 
-### 2026.03.15b
-
-Add external API server on port 3801 for Home Assistant and remote access. Bypasses Unraid nginx auth while keeping all endpoints API-key protected.
-
 
 For older releases, see https://github.com/dereckhall/unraid-deadmans-switch/releases
 ]]>
@@ -51,7 +51,7 @@ Clean old package versions
 <INLINE>
 <![CDATA[
 # Remove old package versions
-rm -f $(ls /boot/config/plugins/deadman-switch/deadman-switch-*.txz 2>/dev/null | grep -v '2026.03.15f')
+rm -f $(ls /boot/config/plugins/deadman-switch/deadman-switch-*.txz 2>/dev/null | grep -v '2026.03.15g')
 
 # Create plugin directory if needed
 mkdir -p /boot/config/plugins/deadman-switch
@@ -66,15 +66,15 @@ PACKAGE INSTALLATION
 Download and install the main package
 ===========================================
 -->
-<FILE Name="/boot/config/plugins/deadman-switch/deadman-switch-2026.03.15f-noarch-1.txz">
-<URL>https://github.com/dereckhall/unraid-deadmans-switch/releases/download/2026.03.15f/deadman-switch-2026.03.15f-noarch-1.txz</URL>
-<SHA256>fd27bdd715a442fd51020fa335c95bdced5b40a4a961d4d57fbbd7e681589da3</SHA256>
+<FILE Name="/boot/config/plugins/deadman-switch/deadman-switch-2026.03.15g-noarch-1.txz">
+<URL>https://github.com/dereckhall/unraid-deadmans-switch/releases/download/2026.03.15g/deadman-switch-2026.03.15g-noarch-1.txz</URL>
+<SHA256>7e00a7d0b763b1730e19a771e6f1a3eac2804957c322f609c9d10c67d58e9954</SHA256>
 </FILE>
 
 <FILE Run="/bin/bash">
 <INLINE>
 <![CDATA[
-upgradepkg --install-new /boot/config/plugins/deadman-switch/deadman-switch-2026.03.15f-noarch-1.txz
+upgradepkg --install-new /boot/config/plugins/deadman-switch/deadman-switch-2026.03.15g-noarch-1.txz
 ]]>
 </INLINE>
 </FILE>
@@ -105,7 +105,7 @@ rm -f /etc/cron.d/deadman-switch
 echo ""
 echo "----------------------------------------------------"
 echo " deadman-switch has been installed."
-echo " Version: 2026.03.15f"
+echo " Version: 2026.03.15g"
 echo "----------------------------------------------------"
 echo ""
 ]]>

@@ -48,6 +48,9 @@ if [ -f "$CONFIG_DIR/config.json" ]; then
     /usr/local/sbin/update_cron
 fi
 
+# Start external API server (port 3801, bypasses nginx auth)
+"$PLUGIN_DIR/scripts/start-api.sh"
+
 # Log the install
 php -r "
     require_once '$PLUGIN_DIR/include/helpers.php';

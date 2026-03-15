@@ -384,12 +384,19 @@ if (file_exists('/var/run/docker.sock')) {
                 <?php endif; ?>
             </div>
             <?php if ($config['api_key']): ?>
-            <?php $base = htmlspecialchars($config['external_url']) . '/plugins/deadman-switch/include/api.php'; ?>
-            <?php $ekey = htmlspecialchars($config['api_key']); ?>
-            <p class="dms-help" style="margin-top:10px">To check in remotely from any device, script, or automation:</p>
-            <pre class="dms-code-block dms-copyable" onclick="dmsCopyText(this)" title="Click to copy">curl "<?= $base ?>?action=checkin&key=<?= $ekey ?>"</pre>
-            <p class="dms-help">To check status:</p>
-            <pre class="dms-code-block dms-copyable" onclick="dmsCopyText(this)" title="Click to copy">curl "<?= $base ?>?action=status&key=<?= $ekey ?>"</pre>
+            <?php
+                // External API runs on port 3801 (bypasses nginx auth)
+                $ext_url = rtrim($config['external_url'], '/');
+                // Extract host from URL, replace port with 3801
+                $parsed = parse_url($ext_url);
+                $api_host = ($parsed['scheme'] ?? 'http') . '://' . ($parsed['host'] ?? 'YOUR_SERVER_IP') . ':3801';
+                $ekey = htmlspecialchars($config['api_key']);
+            ?>
+            <p class="dms-help" style="margin-top:10px">External API runs on port <strong>3801</strong> (no Unraid login required, API key authenticates):</p>
+            <p class="dms-help">Check in remotely:</p>
+            <pre class="dms-code-block dms-copyable" onclick="dmsCopyText(this)" title="Click to copy">curl "<?= $api_host ?>/?action=checkin&key=<?= $ekey ?>"</pre>
+            <p class="dms-help">Get status (for Home Assistant, scripts, monitoring):</p>
+            <pre class="dms-code-block dms-copyable" onclick="dmsCopyText(this)" title="Click to copy">curl "<?= $api_host ?>/?action=status&key=<?= $ekey ?>"</pre>
             <?php else: ?>
             <p class="dms-help" style="margin-top:10px">
                 Generate an API key to enable remote check-ins via <code>curl</code> or any HTTP client.

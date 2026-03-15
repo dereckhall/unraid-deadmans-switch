@@ -265,7 +265,10 @@ function dms_render_template($template, $config, $state) {
 
     $external_url = rtrim($config['external_url'], '/');
     $token = dms_create_quick_checkin_token($state);
-    $checkin_link = $external_url . "/plugins/deadman-switch/include/api.php?action=quickcheckin&token=$token";
+    // Use external API on port 3801 (bypasses nginx auth)
+    $parsed = parse_url($external_url);
+    $api_host = ($parsed['scheme'] ?? 'http') . '://' . ($parsed['host'] ?? 'localhost') . ':3801';
+    $checkin_link = $api_host . "/?action=quickcheckin&token=$token";
 
     $vars = [
         '{{status}}'          => strtoupper(str_replace('_', ' ', $status)),
@@ -376,7 +379,10 @@ function dms_build_discord_embed($config, $state) {
     $external_url = rtrim($config['external_url'], '/');
     if ($external_url && $state['armed'] && !$state['triggered']) {
         $token = dms_create_quick_checkin_token($state);
-        $checkin_link = $external_url . "/plugins/deadman-switch/include/api.php?action=quickcheckin&token=$token";
+        // Use external API on port 3801 (bypasses nginx auth)
+        $parsed = parse_url($external_url);
+        $api_host = ($parsed['scheme'] ?? 'http') . '://' . ($parsed['host'] ?? 'localhost') . ':3801';
+        $checkin_link = $api_host . "/?action=quickcheckin&token=$token";
         $fields[] = ['name' => 'Check In', 'value' => "[Click here to check in]($checkin_link)", 'inline' => false];
     }
 

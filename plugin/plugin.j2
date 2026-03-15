@@ -100,6 +100,9 @@ REMOVE SCRIPT
 <FILE Run="/bin/bash" Method="remove">
 <INLINE>
 <![CDATA[
+# Stop external API server
+/usr/local/emhttp/plugins/{{ name }}/scripts/stop-api.sh 2>/dev/null
+
 # Remove cron file and regenerate system crontab
 rm -f /boot/config/plugins/{{ name }}/{{ name }}.cron
 rm -f /etc/cron.d/{{ name }}

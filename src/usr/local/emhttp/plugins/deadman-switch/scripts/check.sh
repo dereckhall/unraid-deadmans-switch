@@ -16,6 +16,12 @@ log() {
 # Ensure log directory exists
 mkdir -p "$CONFIG_DIR/logs"
 
+# Ensure external API server is running (self-healing)
+PID_FILE="$CONFIG_DIR/api-server.pid"
+if [ ! -f "$PID_FILE" ] || ! kill -0 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null; then
+    "$SCRIPT_DIR/start-api.sh" 2>/dev/null
+fi
+
 if [ ! -f "$CONFIG_FILE" ] || [ ! -f "$STATE_FILE" ]; then
     exit 0
 fi

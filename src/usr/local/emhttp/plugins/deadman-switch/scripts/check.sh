@@ -141,7 +141,7 @@ while IFS= read -r line; do
 
     case "$ACTION" in
         STATUS)
-            # No action needed
+            log "Cron check: $DETAIL"
             ;;
         UNPAUSE)
             log "Pause expired, timer automatically resumed"

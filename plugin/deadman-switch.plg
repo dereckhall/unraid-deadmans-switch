@@ -4,7 +4,7 @@
 <PLUGIN
   name="deadman-switch"
   author="Dereck"
-  version="2026.03.14l"
+  version="2026.03.14m"
   launch="Settings/deadman-switch"
   pluginURL="https://raw.githubusercontent.com/dereckhall/unraid-deadmans-switch/main/plugin/deadman-switch.plg"
   icon="bomb"
@@ -15,6 +15,10 @@
 
 <CHANGES>
 <![CDATA[
+
+### 2026.03.14m
+
+Fix cron to use Unraid's native update_cron system instead of writing directly to /etc/cron.d/. Creates .cron file in plugin config dir and calls update_cron to regenerate system crontab.
 
 ### 2026.03.14l
 
@@ -41,10 +45,6 @@ Compact dashboard widget into column tile instead of full-width row
 
 Add click-to-copy, delete API key button, auto-reload on key generate/delete
 
-### 2026.03.14h
-
-Fix API key curl examples layout
-
 
 For older releases, see https://github.com/dereckhall/unraid-deadmans-switch/releases
 ]]>
@@ -60,7 +60,7 @@ Clean old package versions
 <INLINE>
 <![CDATA[
 # Remove old package versions
-rm -f $(ls /boot/config/plugins/deadman-switch/deadman-switch-*.txz 2>/dev/null | grep -v '2026.03.14l')
+rm -f $(ls /boot/config/plugins/deadman-switch/deadman-switch-*.txz 2>/dev/null | grep -v '2026.03.14m')
 
 # Create plugin directory if needed
 mkdir -p /boot/config/plugins/deadman-switch
@@ -75,28 +75,16 @@ PACKAGE INSTALLATION
 Download and install the main package
 ===========================================
 -->
-<FILE Name="/boot/config/plugins/deadman-switch/deadman-switch-2026.03.14l-noarch-1.txz">
-<URL>https://github.com/dereckhall/unraid-deadmans-switch/releases/download/2026.03.14l/deadman-switch-2026.03.14l-noarch-1.txz</URL>
-<SHA256>8e66d1eb09eb86df9d981a22a80828dcfc7cd0984f31b953132d42c8aaa58dec</SHA256>
+<FILE Name="/boot/config/plugins/deadman-switch/deadman-switch-2026.03.14m-noarch-1.txz">
+<URL>https://github.com/dereckhall/unraid-deadmans-switch/releases/download/2026.03.14m/deadman-switch-2026.03.14m-noarch-1.txz</URL>
+<SHA256>afcbed075a03a7dec188ad81069d3c60b9e95e419f956a112db8ca6f80ff25af</SHA256>
 </FILE>
 
 <FILE Run="/bin/bash">
 <INLINE>
 <![CDATA[
-upgradepkg --install-new /boot/config/plugins/deadman-switch/deadman-switch-2026.03.14l-noarch-1.txz
+upgradepkg --install-new /boot/config/plugins/deadman-switch/deadman-switch-2026.03.14m-noarch-1.txz
 ]]>
-</INLINE>
-</FILE>
-
-<!--
-===========================================
-CRON JOB
-Runs hourly by default, reconfigurable via settings
-===========================================
--->
-<FILE Name="/etc/cron.d/deadman-switch">
-<INLINE>
-0 * * * * /usr/local/emhttp/plugins/deadman-switch/scripts/check.sh >> /boot/config/plugins/deadman-switch/logs/cron.log 2>&amp;1
 </INLINE>
 </FILE>
 
@@ -111,13 +99,22 @@ POST-INSTALL SCRIPT
 # Set script permissions
 chmod +x /usr/local/emhttp/plugins/deadman-switch/scripts/*.sh 2>/dev/null
 
+# Create cron file in plugin config dir (Unraid's update_cron reads *.cron from here)
+echo "0 * * * * /usr/local/emhttp/plugins/deadman-switch/scripts/check.sh >> /boot/config/plugins/deadman-switch/logs/cron.log 2>&1" > /boot/config/plugins/deadman-switch/deadman-switch.cron
+
+# Remove legacy cron file if present (old versions wrote directly to /etc/cron.d/)
+rm -f /etc/cron.d/deadman-switch
+
+# Regenerate system crontab
+/usr/local/sbin/update_cron
+
 # Run install script (initializes config/state if needed)
 /usr/local/emhttp/plugins/deadman-switch/scripts/install.sh
 
 echo ""
 echo "----------------------------------------------------"
 echo " deadman-switch has been installed."
-echo " Version: 2026.03.14l"
+echo " Version: 2026.03.14m"
 echo "----------------------------------------------------"
 echo ""
 ]]>
@@ -132,8 +129,10 @@ REMOVE SCRIPT
 <FILE Run="/bin/bash" Method="remove">
 <INLINE>
 <![CDATA[
-# Remove cron job
+# Remove cron file and regenerate system crontab
+rm -f /boot/config/plugins/deadman-switch/deadman-switch.cron
 rm -f /etc/cron.d/deadman-switch
+/usr/local/sbin/update_cron
 
 # Remove the package
 removepkg deadman-switch 2>/dev/null

@@ -27,9 +27,9 @@ $message = dms_render_template($config['message_template'], $config, $state);
 $max_retries = 3;
 $base_delay = 5;
 
-function send_webhook_with_retry($type, $webhook_config, $message, $max_retries, $base_delay) {
+function send_webhook_with_retry($type, $webhook_config, $message, $config, $state, $max_retries, $base_delay) {
     for ($attempt = 1; $attempt <= $max_retries; $attempt++) {
-        $result = dms_send_webhook($type, $webhook_config, $message);
+        $result = dms_send_webhook($type, $webhook_config, $message, $config, $state);
         if ($result['success']) {
             dms_log("Notification sent via $type");
             return true;
@@ -45,7 +45,7 @@ function send_webhook_with_retry($type, $webhook_config, $message, $max_retries,
 
 foreach ($config['webhooks'] as $type => $wh) {
     if (!$wh['enabled']) continue;
-    send_webhook_with_retry($type, $wh, $message, $max_retries, $base_delay);
+    send_webhook_with_retry($type, $wh, $message, $config, $state, $max_retries, $base_delay);
 }
 PHPEOF
 

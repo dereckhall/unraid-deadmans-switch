@@ -311,7 +311,79 @@ function dms_send_unraid_notification($subject, $description, $importance = 'nor
     exec($cmd);
 }
 
-function dms_send_webhook($type, $webhook_config, $message) {
+function dms_build_discord_embed($config, $state) {
+    $status = dms_get_status($config, $state);
+    $warning_level = dms_get_warning_level($config, $state);
+    $remaining = dms_time_remaining($config, $state);
+    $remaining_text = $remaining !== null ? dms_format_time_remaining($remaining) : 'N/A';
+    $days = $remaining ? max(0, round($remaining / 86400, 1)) : 0;
+    $hours = $remaining ? max(0, round($remaining / 3600)) : 0;
+
+    // Color based on severity (Discord uses decimal color values)
+    $colors = [
+        'none'        => 0x4CAF50, // green
+        'reminder'    => 0xFF9800, // orange
+        'warning'     => 0xFF9800, // orange
+        'critical'    => 0xF44336, // red
+        'last_chance' => 0xD32F2F, // dark red
+        'grace'       => 0xB71C1C, // very dark red
+        'triggered'   => 0xB71C1C,
+    ];
+    $color = $colors[$warning_level] ?? 0xFF9800;
+
+    // Status label for title
+    $status_labels = [
+        'armed_ok'       => 'OK',
+        'armed_warning'  => 'WARNING',
+        'armed_critical' => 'CRITICAL',
+        'grace_period'   => 'GRACE PERIOD',
+        'triggered'      => 'TRIGGERED',
+        'paused'         => 'PAUSED',
+        'disarmed'       => 'DISARMED',
+    ];
+    $status_label = $status_labels[$status] ?? strtoupper($status);
+
+    // Build fields
+    $fields = [];
+    $fields[] = ['name' => 'Status', 'value' => $status_label, 'inline' => true];
+    $fields[] = ['name' => 'Time Remaining', 'value' => $remaining_text, 'inline' => true];
+
+    if ($state['last_checkin']) {
+        $fields[] = ['name' => 'Last Check-in', 'value' => date('M j, Y g:i A', strtotime($state['last_checkin'])), 'inline' => false];
+    }
+
+    $deadline = dms_get_deadline($config, $state);
+    if ($deadline) {
+        $fields[] = ['name' => 'Deadline', 'value' => date('M j, Y g:i A', $deadline), 'inline' => true];
+    }
+
+    if ($status === 'grace_period') {
+        $grace_end = dms_get_grace_end($config, $state);
+        if ($grace_end) {
+            $fields[] = ['name' => 'Actions Execute At', 'value' => date('M j, Y g:i A', $grace_end), 'inline' => true];
+        }
+    }
+
+    // Quick check-in link
+    $external_url = rtrim($config['external_url'], '/');
+    if ($external_url && $state['armed'] && !$state['triggered']) {
+        $token = dms_create_quick_checkin_token($state);
+        $checkin_link = $external_url . "/plugins/deadman-switch/include/api.php?action=quickcheckin&token=$token";
+        $fields[] = ['name' => 'Quick Check-in', 'value' => "[Click here to check in]($checkin_link)", 'inline' => false];
+    }
+
+    $embed = [
+        'title'  => "Dead Man's Switch: $status_label",
+        'color'  => $color,
+        'fields' => $fields,
+        'footer' => ['text' => 'Dead Man\'s Switch v' . DMS_VERSION],
+        'timestamp' => date('c'),
+    ];
+
+    return $embed;
+}
+
+function dms_send_webhook($type, $webhook_config, $message, $config = null, $state = null) {
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_TIMEOUT, 10);
@@ -322,7 +394,14 @@ function dms_send_webhook($type, $webhook_config, $message) {
             curl_setopt($ch, CURLOPT_URL, $webhook_config['url']);
             curl_setopt($ch, CURLOPT_POST, true);
             curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['content' => $message]));
+
+            // Use rich embed if config/state available, fall back to plain text
+            if ($config && $state) {
+                $payload = ['embeds' => [dms_build_discord_embed($config, $state)]];
+            } else {
+                $payload = ['content' => $message];
+            }
+            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
             break;
 
         case 'custom':
@@ -361,9 +440,10 @@ function dms_test_webhook($config, $type) {
         return ['success' => false, 'message' => "Webhook '$type' is not enabled"];
     }
 
+    $state = dms_load_state();
     $message = "Dead Man's Switch test notification. If you see this, your webhook is configured correctly.";
 
-    $result = dms_send_webhook($type, $webhooks[$type], $message);
+    $result = dms_send_webhook($type, $webhooks[$type], $message, $config, $state);
     dms_log("Test webhook sent: $type - " . ($result['success'] ? 'OK' : 'FAILED: ' . $result['message']));
     return $result;
 }

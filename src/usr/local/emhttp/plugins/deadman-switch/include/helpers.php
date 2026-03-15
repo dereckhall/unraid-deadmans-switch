@@ -184,6 +184,7 @@ function dms_get_status($config, $state) {
     if ($level === 'triggered') return 'triggered';
     if (in_array($level, ['critical', 'last_chance'])) return 'armed_critical';
     if ($level === 'warning') return 'armed_warning';
+    if ($level === 'reminder') return 'armed_reminder';
     return 'armed_ok';
 }
 
@@ -326,6 +327,7 @@ function dms_build_discord_embed($config, $state) {
     // Severity tiers: green (ok), orange (warning), red (critical/grace/triggered)
     $severity = [
         'armed_ok'       => 'green',
+        'armed_reminder' => 'yellow',
         'armed_warning'  => 'orange',
         'armed_critical' => 'red',
         'grace_period'   => 'red',
@@ -335,12 +337,13 @@ function dms_build_discord_embed($config, $state) {
     ];
     $tier = $severity[$status] ?? 'orange';
 
-    $tier_colors = ['green' => 0x2ECC71, 'orange' => 0xFF9800, 'red' => 0xE74C3C];
+    $tier_colors = ['green' => 0x2ECC71, 'yellow' => 0xFFC107, 'orange' => 0xFF9800, 'red' => 0xE74C3C];
     $color = $tier_colors[$tier];
 
     // Emoji matches the sidebar color
     $tier_emoji = [
         'green'  => "\xE2\x9C\x85",  // ✅
+        'yellow' => "\xF0\x9F\x94\x94", // 🔔
         'orange' => "\xE2\x9A\xA0\xEF\xB8\x8F", // ⚠️
         'red'    => "\xE2\x9D\x8C",  // ❌
     ];
@@ -348,6 +351,7 @@ function dms_build_discord_embed($config, $state) {
 
     $headlines = [
         'armed_ok'       => "$e Dead Man's Switch is OK. $e",
+        'armed_reminder' => "$e Check-in reminder. $e",
         'armed_warning'  => "$e Check-in deadline is approaching. $e",
         'armed_critical' => "$e Check-in urgently needed! $e",
         'grace_period'   => "$e Deadline missed. Grace period active. $e",

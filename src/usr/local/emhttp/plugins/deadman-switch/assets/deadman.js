@@ -222,6 +222,7 @@ function dmsSaveSettings() {
         checkin_interval_days: parseInt($('#cfg-interval').val()),
         grace_period_hours: parseInt($('#cfg-grace').val()),
         external_url: $('#cfg-external-url').val(),
+        api_host: $('#cfg-api-host').val(),
         cron_interval_minutes: parseInt($('#cfg-cron-interval').val()),
         pause_max_hours: parseInt($('#cfg-pause-max').val()),
         dry_run: $('#cfg-dry-run').is(':checked'),

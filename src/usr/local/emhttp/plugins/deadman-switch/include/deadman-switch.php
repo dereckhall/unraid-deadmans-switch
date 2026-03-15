@@ -350,8 +350,11 @@ if (file_exists('/var/run/docker.sock')) {
                 <label>Grace Period (hours):
                     <input type="number" id="cfg-grace" value="<?= $config['grace_period_hours'] ?>" min="1" max="720" class="dms-input dms-input-sm">
                 </label>
-                <label>External URL:
-                    <input type="url" id="cfg-external-url" value="<?= htmlspecialchars($config['external_url']) ?>" class="dms-input" placeholder="http://192.168.1.50 or https://unraid.mydomain.com">
+                <label>External URL (reverse proxy):
+                    <input type="url" id="cfg-external-url" value="<?= htmlspecialchars($config['external_url']) ?>" class="dms-input" placeholder="https://unraid.mydomain.com">
+                </label>
+                <label>API Host (direct server address with port 3801):
+                    <input type="url" id="cfg-api-host" value="<?= htmlspecialchars($config['api_host']) ?>" class="dms-input" placeholder="http://192.168.0.116:3801 or http://unraido.dereck.org:3801">
                 </label>
                 <label>Cron Check Interval (minutes):
                     <input type="number" id="cfg-cron-interval" value="<?= $config['cron_interval_minutes'] ?>" min="5" max="1440" class="dms-input dms-input-sm">
@@ -385,18 +388,18 @@ if (file_exists('/var/run/docker.sock')) {
             </div>
             <?php if ($config['api_key']): ?>
             <?php
-                // External API runs on port 3801 (bypasses nginx auth)
-                $ext_url = rtrim($config['external_url'], '/');
-                // Extract host from URL, replace port with 3801
-                $parsed = parse_url($ext_url);
-                $api_host = ($parsed['scheme'] ?? 'http') . '://' . ($parsed['host'] ?? 'YOUR_SERVER_IP') . ':3801';
+                $api_host = rtrim($config['api_host'] ?? '', '/');
                 $ekey = htmlspecialchars($config['api_key']);
             ?>
-            <p class="dms-help" style="margin-top:10px">External API runs on port <strong>3801</strong> (no Unraid login required, API key authenticates):</p>
+            <?php if ($api_host): ?>
+            <p class="dms-help" style="margin-top:10px">External API (no Unraid login required, API key authenticates):</p>
             <p class="dms-help">Check in remotely:</p>
-            <pre class="dms-code-block dms-copyable" onclick="dmsCopyText(this)" title="Click to copy">curl "<?= $api_host ?>/?action=checkin&key=<?= $ekey ?>"</pre>
+            <pre class="dms-code-block dms-copyable" onclick="dmsCopyText(this)" title="Click to copy">curl "<?= htmlspecialchars($api_host) ?>/?action=checkin&key=<?= $ekey ?>"</pre>
             <p class="dms-help">Get status (for Home Assistant, scripts, monitoring):</p>
-            <pre class="dms-code-block dms-copyable" onclick="dmsCopyText(this)" title="Click to copy">curl "<?= $api_host ?>/?action=status&key=<?= $ekey ?>"</pre>
+            <pre class="dms-code-block dms-copyable" onclick="dmsCopyText(this)" title="Click to copy">curl "<?= htmlspecialchars($api_host) ?>/?action=status&key=<?= $ekey ?>"</pre>
+            <?php else: ?>
+            <p class="dms-help" style="margin-top:10px">Set the <strong>API Host</strong> field above to see curl examples (e.g. <code>http://YOUR_SERVER_IP:3801</code>).</p>
+            <?php endif; ?>
             <?php else: ?>
             <p class="dms-help" style="margin-top:10px">
                 Generate an API key to enable remote check-ins via <code>curl</code> or any HTTP client.

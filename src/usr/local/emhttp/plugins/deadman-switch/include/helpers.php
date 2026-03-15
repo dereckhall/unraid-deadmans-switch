@@ -30,6 +30,7 @@ function dms_load_config() {
         'checkin_interval_days'       => 30,
         'grace_period_hours'          => 48,
         'external_url'                => '',
+        'api_host'                    => '',
         'api_key'                     => '',
         'dry_run'                     => true,
         'double_miss'                 => false,
@@ -263,12 +264,9 @@ function dms_render_template($template, $config, $state) {
     $hours = $remaining ? max(0, round($remaining / 3600)) : 0;
     $status = dms_get_status($config, $state);
 
-    $external_url = rtrim($config['external_url'], '/');
+    $api_host = rtrim($config['api_host'] ?? '', '/');
     $token = dms_create_quick_checkin_token($state);
-    // Use external API on port 3801 (bypasses nginx auth)
-    $parsed = parse_url($external_url);
-    $api_host = ($parsed['scheme'] ?? 'http') . '://' . ($parsed['host'] ?? 'localhost') . ':3801';
-    $checkin_link = $api_host . "/?action=quickcheckin&token=$token";
+    $checkin_link = $api_host ? "$api_host/?action=quickcheckin&token=$token" : '';
 
     $vars = [
         '{{status}}'          => strtoupper(str_replace('_', ' ', $status)),
@@ -376,13 +374,10 @@ function dms_build_discord_embed($config, $state) {
         }
     }
 
-    $external_url = rtrim($config['external_url'], '/');
-    if ($external_url && $state['armed'] && !$state['triggered']) {
+    $api_host = rtrim($config['api_host'] ?? '', '/');
+    if ($api_host && $state['armed'] && !$state['triggered']) {
         $token = dms_create_quick_checkin_token($state);
-        // Use external API on port 3801 (bypasses nginx auth)
-        $parsed = parse_url($external_url);
-        $api_host = ($parsed['scheme'] ?? 'http') . '://' . ($parsed['host'] ?? 'localhost') . ':3801';
-        $checkin_link = $api_host . "/?action=quickcheckin&token=$token";
+        $checkin_link = "$api_host/?action=quickcheckin&token=$token";
         $fields[] = ['name' => 'Check In', 'value' => "[Click here to check in]($checkin_link)", 'inline' => false];
     }
 

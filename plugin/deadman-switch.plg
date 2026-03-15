@@ -4,7 +4,7 @@
 <PLUGIN
   name="deadman-switch"
   author="Dereck"
-  version="2026.03.15"
+  version="2026.03.15a"
   launch="Settings/deadman-switch"
   pluginURL="https://raw.githubusercontent.com/dereckhall/unraid-deadmans-switch/main/plugin/deadman-switch.plg"
   icon="bomb"
@@ -15,6 +15,10 @@
 
 <CHANGES>
 <![CDATA[
+
+### 2026.03.15a
+
+Discord rich embeds with severity-matched colors/emoji, stacked fields, and clickable check-in link.
 
 ### 2026.03.15
 
@@ -32,19 +36,6 @@ Fix cron to use Unraid's native update_cron system instead of writing directly t
 
 Fix cron job that never ran: Unraid uses Dillon's cron daemon which does not support the user field in /etc/cron.d/ files. The 'root' token was being interpreted as the command, causing exit 127 on every cycle.
 
-### 2026.03.14k
-
-Security hardening and reliability fixes
-
-- Require API key for get_state endpoint (was unauthenticated, exposed secrets)
-- Add file locking to state/config writes to prevent race conditions
-- Quote path expansion in trigger.sh to prevent unintended glob deletion
-- Deduplicate grace period notifications (once, not every cron cycle)
-- Add timeout to Docker commands on settings page
-- Fix countdown timer drift using wall-clock time
-- Redirect cron output to log file instead of /dev/null
-- Remove obsolete dashboard-widget.php
-
 
 For older releases, see https://github.com/dereckhall/unraid-deadmans-switch/releases
 ]]>
@@ -60,7 +51,7 @@ Clean old package versions
 <INLINE>
 <![CDATA[
 # Remove old package versions
-rm -f $(ls /boot/config/plugins/deadman-switch/deadman-switch-*.txz 2>/dev/null | grep -v '2026.03.15')
+rm -f $(ls /boot/config/plugins/deadman-switch/deadman-switch-*.txz 2>/dev/null | grep -v '2026.03.15a')
 
 # Create plugin directory if needed
 mkdir -p /boot/config/plugins/deadman-switch
@@ -75,15 +66,15 @@ PACKAGE INSTALLATION
 Download and install the main package
 ===========================================
 -->
-<FILE Name="/boot/config/plugins/deadman-switch/deadman-switch-2026.03.15-noarch-1.txz">
-<URL>https://github.com/dereckhall/unraid-deadmans-switch/releases/download/2026.03.15/deadman-switch-2026.03.15-noarch-1.txz</URL>
-<SHA256>7e573d24b5e10cfc1593025aa9ed895f0e28f9f49688453efeae35e2e8c262e9</SHA256>
+<FILE Name="/boot/config/plugins/deadman-switch/deadman-switch-2026.03.15a-noarch-1.txz">
+<URL>https://github.com/dereckhall/unraid-deadmans-switch/releases/download/2026.03.15a/deadman-switch-2026.03.15a-noarch-1.txz</URL>
+<SHA256>e9d3758ac8f23726c73b79ac5659587eb889438945bd4c165ecf1b253ec356a4</SHA256>
 </FILE>
 
 <FILE Run="/bin/bash">
 <INLINE>
 <![CDATA[
-upgradepkg --install-new /boot/config/plugins/deadman-switch/deadman-switch-2026.03.15-noarch-1.txz
+upgradepkg --install-new /boot/config/plugins/deadman-switch/deadman-switch-2026.03.15a-noarch-1.txz
 ]]>
 </INLINE>
 </FILE>
@@ -114,7 +105,7 @@ rm -f /etc/cron.d/deadman-switch
 echo ""
 echo "----------------------------------------------------"
 echo " deadman-switch has been installed."
-echo " Version: 2026.03.15"
+echo " Version: 2026.03.15a"
 echo "----------------------------------------------------"
 echo ""
 ]]>

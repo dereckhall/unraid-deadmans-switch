@@ -1,6 +1,10 @@
 <?php
 // Dead Man's Switch - Shared PHP Functions
 
+// Use system timezone so logs/embeds match Unraid's configured time
+$_tz_parts = explode('zoneinfo/', @trim(shell_exec("readlink /etc/localtime 2>/dev/null")), 2);
+if (isset($_tz_parts[1])) @date_default_timezone_set($_tz_parts[1]);
+
 define('DMS_CONFIG_DIR', '/boot/config/plugins/deadman-switch');
 define('DMS_CONFIG_FILE', DMS_CONFIG_DIR . '/config.json');
 define('DMS_STATE_FILE', DMS_CONFIG_DIR . '/state.json');

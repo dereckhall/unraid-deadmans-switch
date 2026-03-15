@@ -67,7 +67,7 @@ Runs hourly by default, reconfigurable via settings
 -->
 <FILE Name="/etc/cron.d/{{ name }}">
 <INLINE>
-0 * * * * root /usr/local/emhttp/plugins/{{ name }}/scripts/check.sh >> /boot/config/plugins/{{ name }}/logs/cron.log 2>&amp;1
+0 * * * * /usr/local/emhttp/plugins/{{ name }}/scripts/check.sh >> /boot/config/plugins/{{ name }}/logs/cron.log 2>&amp;1
 </INLINE>
 </FILE>
 

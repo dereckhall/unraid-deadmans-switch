@@ -386,7 +386,10 @@ function dms_build_discord_embed($config, $state) {
         $fields[] = ['name' => 'Check In', 'value' => "[Click here to check in]($checkin_link)", 'inline' => false];
     }
 
+    $hostname = gethostname() ?: 'Unraid';
+
     return [
+        'author'      => ['name' => $hostname],
         'description' => $headline,
         'color'       => $color,
         'fields'      => $fields,

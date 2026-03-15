@@ -1,3 +1,95 @@
-Menu="Dashboard"
+Menu="Dashboard:0"
 ---
-<?php require_once '/usr/local/emhttp/plugins/deadman-switch/include/dashboard-widget.php'; ?>
+<?php
+require_once '/usr/local/emhttp/plugins/deadman-switch/include/helpers.php';
+
+if (!isset($var)) {
+    $var = @parse_ini_file('/var/local/emhttp/var.ini') ?: [];
+}
+
+$config = dms_load_config();
+$state = dms_load_state();
+$status = dms_get_status($config, $state);
+$remaining = dms_time_remaining($config, $state);
+
+$badge_colors = [
+    'disarmed'       => '#6c757d',
+    'armed_ok'       => '#4caf50',
+    'armed_warning'  => '#ff9800',
+    'armed_critical' => '#f44336',
+    'grace_period'   => '#d32f2f',
+    'triggered'      => '#b71c1c',
+    'paused'         => '#2196f3',
+];
+
+$badge_labels = [
+    'disarmed'       => 'DISARMED',
+    'armed_ok'       => 'OK',
+    'armed_warning'  => 'WARNING',
+    'armed_critical' => 'CRITICAL',
+    'grace_period'   => 'GRACE PERIOD',
+    'triggered'      => 'TRIGGERED',
+    'paused'         => 'PAUSED',
+];
+
+$color = $badge_colors[$status] ?? '#6c757d';
+$label = $badge_labels[$status] ?? strtoupper($status);
+
+$remaining_text = '';
+if ($state['armed'] && $remaining !== null && !$state['paused']) {
+    $remaining_text = dms_format_time_remaining($remaining);
+}
+
+$last_checkin_ago = '';
+if ($state['last_checkin']) {
+    $ago_seconds = time() - strtotime($state['last_checkin']);
+    $ago_days = floor($ago_seconds / 86400);
+    $ago_hours = floor(($ago_seconds % 86400) / 3600);
+    if ($ago_days > 0) {
+        $last_checkin_ago = "{$ago_days}d {$ago_hours}h ago";
+    } else {
+        $last_checkin_ago = "{$ago_hours}h ago";
+    }
+}
+
+$csrf = htmlspecialchars($var['csrf_token'] ?? '');
+
+// Status line
+$status_line = "<span style='display:inline-block;padding:1px 6px;border-radius:3px;background:{$color};color:#fff;font-size:0.8em;font-weight:bold'>{$label}</span>";
+if ($remaining_text) {
+    $status_line .= " <span style='font-family:monospace;font-weight:bold;color:{$color};font-size:0.9em'>{$remaining_text}</span>";
+}
+
+// Detail line
+$detail_line = '';
+if ($last_checkin_ago) {
+    $detail_line .= "Checked in {$last_checkin_ago}";
+}
+
+// Check-in button
+$checkin_btn = '';
+if ($state['armed'] && !$state['triggered']) {
+    $checkin_btn = "<button id='dms-wci' onclick='dmsWCI(this)' style='padding:2px 10px;background:#4caf50;color:#fff;border:none;border-radius:3px;font-size:0.75em;font-weight:bold;cursor:pointer;margin-left:6px'>CHECK IN</button>";
+}
+
+$checkin_script = <<<SCRIPT
+<script>
+function dmsWCI(b){b.disabled=true;b.textContent='...';
+$.post('/plugins/deadman-switch/include/api.php',{action:'web_checkin',csrf_token:'{$csrf}'},function(d){
+if(d.success){b.textContent='Done!';b.style.background='#2e7d32';setTimeout(function(){location.reload()},1500)}
+else{b.textContent='Error';b.style.background='#d32f2f';b.disabled=false}
+},'json').fail(function(){b.textContent='Error';b.style.background='#d32f2f';b.disabled=false})}
+</script>
+SCRIPT;
+
+$mytiles['deadman-switch']['column3'] = <<<EOT
+<tbody title="Dead Man's Switch">
+<tr><td><a href="/Settings/deadman-switch" style="color:inherit;text-decoration:none"><i class="fa fa-bomb"></i> <b>Dead Man's Switch</b></a></td></tr>
+<tr><td>
+{$status_line}{$checkin_btn}<br>
+<span style="color:#999;font-size:0.8em">{$detail_line}</span>
+{$checkin_script}
+</td></tr>
+</tbody>
+EOT;
+?>

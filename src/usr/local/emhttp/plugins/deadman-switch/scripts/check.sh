@@ -150,30 +150,10 @@ while IFS= read -r line; do
             LEVEL=$(echo "$DETAIL" | cut -d: -f1)
             MSG=$(echo "$DETAIL" | cut -d: -f2-)
             log "Sending $LEVEL notification: $MSG"
-            # Send via configured webhooks
             "$SCRIPT_DIR/notify.sh" "$LEVEL"
-            # Also send via Unraid's built-in notification system
-            IMPORTANCE="normal"
-            case "$LEVEL" in
-                critical|last_chance) IMPORTANCE="alert" ;;
-                warning|grace) IMPORTANCE="warning" ;;
-            esac
-            /usr/local/emhttp/webGui/scripts/notify \
-                -e "Dead Man's Switch" \
-                -s "Dead Man's Switch: $LEVEL" \
-                -d "$MSG" \
-                -i "$IMPORTANCE" \
-                -l "/Settings/deadman-switch" 2>/dev/null
             ;;
         TRIGGER)
             log "TRIGGER CONDITION MET: $DETAIL" "CRITICAL"
-            # Unraid alert notification for trigger
-            /usr/local/emhttp/webGui/scripts/notify \
-                -e "Dead Man's Switch" \
-                -s "Dead Man's Switch TRIGGERED" \
-                -d "Grace period expired. Executing configured actions." \
-                -i "alert" \
-                -l "/Settings/deadman-switch" 2>/dev/null
             "$SCRIPT_DIR/trigger.sh"
             ;;
     esac

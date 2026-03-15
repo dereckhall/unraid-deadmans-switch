@@ -15,6 +15,12 @@ define('DMS_VERSION', (function() {
     return 'unknown';
 })());
 
+function dms_get_api_base() {
+    $nginx = @parse_ini_file('/var/local/emhttp/nginx.ini');
+    $host = $nginx['NGINX_LANIP'] ?? $nginx['NGINX_LANMDNS'] ?? 'localhost';
+    return "http://$host:3801";
+}
+
 function dms_ensure_dirs() {
     $dirs = [DMS_CONFIG_DIR, DMS_LOG_DIR];
     foreach ($dirs as $dir) {
@@ -30,7 +36,6 @@ function dms_load_config() {
         'checkin_interval_days'       => 30,
         'grace_period_hours'          => 48,
         'external_url'                => '',
-        'api_host'                    => '',
         'api_key'                     => '',
         'dry_run'                     => true,
         'double_miss'                 => false,
@@ -264,9 +269,9 @@ function dms_render_template($template, $config, $state) {
     $hours = $remaining ? max(0, round($remaining / 3600)) : 0;
     $status = dms_get_status($config, $state);
 
-    $api_host = rtrim($config['api_host'] ?? '', '/');
+    $api_base = dms_get_api_base();
     $token = dms_create_quick_checkin_token($state);
-    $checkin_link = $api_host ? "$api_host/?action=quickcheckin&token=$token" : '';
+    $checkin_link = "$api_base/?action=quickcheckin&token=$token";
 
     $vars = [
         '{{status}}'          => strtoupper(str_replace('_', ' ', $status)),
@@ -374,10 +379,10 @@ function dms_build_discord_embed($config, $state) {
         }
     }
 
-    $api_host = rtrim($config['api_host'] ?? '', '/');
-    if ($api_host && $state['armed'] && !$state['triggered']) {
+    if ($state['armed'] && !$state['triggered']) {
+        $api_base = dms_get_api_base();
         $token = dms_create_quick_checkin_token($state);
-        $checkin_link = "$api_host/?action=quickcheckin&token=$token";
+        $checkin_link = "$api_base/?action=quickcheckin&token=$token";
         $fields[] = ['name' => 'Check In', 'value' => "[Click here to check in]($checkin_link)", 'inline' => false];
     }
 

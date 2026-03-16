@@ -4,7 +4,7 @@
 <PLUGIN
   name="deadman-switch"
   author="Dereck"
-  version="2026.03.15j"
+  version="2026.03.16a"
   launch="Settings/deadman-switch"
   pluginURL="https://raw.githubusercontent.com/dereckhall/unraid-deadmans-switch/main/plugin/deadman-switch.plg"
   icon="bomb"
@@ -15,6 +15,10 @@
 
 <CHANGES>
 <![CDATA[
+
+### 2026.03.16a
+
+Fix disarm/arm not clearing triggered state. Disarming and re-arming now fully resets all state for a clean start.
 
 ### 2026.03.15j
 
@@ -32,10 +36,6 @@ Log every cron check run to deadman.log for visibility
 
 Fix reminder notification showing green/OK instead of yellow/bell emoji
 
-### 2026.03.15f
-
-Add Unraid logo icon next to server hostname in Discord embed header.
-
 
 For older releases, see https://github.com/dereckhall/unraid-deadmans-switch/releases
 ]]>
@@ -51,7 +51,7 @@ Clean old package versions
 <INLINE>
 <![CDATA[
 # Remove old package versions
-rm -f $(ls /boot/config/plugins/deadman-switch/deadman-switch-*.txz 2>/dev/null | grep -v '2026.03.15j')
+rm -f $(ls /boot/config/plugins/deadman-switch/deadman-switch-*.txz 2>/dev/null | grep -v '2026.03.16a')
 
 # Create plugin directory if needed
 mkdir -p /boot/config/plugins/deadman-switch
@@ -66,15 +66,15 @@ PACKAGE INSTALLATION
 Download and install the main package
 ===========================================
 -->
-<FILE Name="/boot/config/plugins/deadman-switch/deadman-switch-2026.03.15j-noarch-1.txz">
-<URL>https://github.com/dereckhall/unraid-deadmans-switch/releases/download/2026.03.15j/deadman-switch-2026.03.15j-noarch-1.txz</URL>
-<SHA256>7d9ee2b5def4a972f0a4c847b4fefda9f7395420061ec4322e33ce97dffac7a4</SHA256>
+<FILE Name="/boot/config/plugins/deadman-switch/deadman-switch-2026.03.16a-noarch-1.txz">
+<URL>https://github.com/dereckhall/unraid-deadmans-switch/releases/download/2026.03.16a/deadman-switch-2026.03.16a-noarch-1.txz</URL>
+<SHA256>bd68dc4b1177d3bafff695029d2d099fb367683ad38bb59b994cf0c61e9f7ee4</SHA256>
 </FILE>
 
 <FILE Run="/bin/bash">
 <INLINE>
 <![CDATA[
-upgradepkg --install-new /boot/config/plugins/deadman-switch/deadman-switch-2026.03.15j-noarch-1.txz
+upgradepkg --install-new /boot/config/plugins/deadman-switch/deadman-switch-2026.03.16a-noarch-1.txz
 ]]>
 </INLINE>
 </FILE>
@@ -105,7 +105,7 @@ rm -f /etc/cron.d/deadman-switch
 echo ""
 echo "----------------------------------------------------"
 echo " deadman-switch has been installed."
-echo " Version: 2026.03.15j"
+echo " Version: 2026.03.16a"
 echo "----------------------------------------------------"
 echo ""
 ]]>

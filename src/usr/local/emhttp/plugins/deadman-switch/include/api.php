@@ -123,10 +123,13 @@ switch ($action) {
             break;
         }
         $state['armed'] = true;
-        if (!$state['last_checkin']) {
-            $state['last_checkin'] = date('c');
-            $state['checkin_history'][] = ['time' => date('c'), 'method' => 'arm'];
-        }
+        $state['triggered'] = false;
+        $state['trigger_time'] = null;
+        $state['grace_period_start'] = null;
+        $state['missed_count'] = 0;
+        $state['last_notification_level'] = null;
+        $state['last_checkin'] = date('c');
+        $state['checkin_history'][] = ['time' => date('c'), 'method' => 'arm'];
         dms_save_state($state);
         dms_log("Switch ARMED");
         echo json_encode(['success' => true]);
@@ -134,7 +137,11 @@ switch ($action) {
 
     case 'disarm':
         $state['armed'] = false;
+        $state['triggered'] = false;
+        $state['trigger_time'] = null;
         $state['grace_period_start'] = null;
+        $state['missed_count'] = 0;
+        $state['last_notification_level'] = null;
         dms_save_state($state);
         dms_log("Switch DISARMED");
         echo json_encode(['success' => true]);

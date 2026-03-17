@@ -79,8 +79,8 @@ rm -f /etc/cron.d/{{ name }}
 # Regenerate system crontab
 /usr/local/sbin/update_cron
 
-# Run install script (initializes config/state if needed)
-/usr/local/emhttp/plugins/{{ name }}/scripts/install.sh
+# Run install script (initializes config/state if needed, pass version since PLG isn't written yet)
+/usr/local/emhttp/plugins/{{ name }}/scripts/install.sh "{{ env['PLUGIN_VERSION'] }}"
 
 echo ""
 echo "----------------------------------------------------"

@@ -51,10 +51,11 @@ fi
 # Start external API server (port 3801, bypasses nginx auth)
 "$PLUGIN_DIR/scripts/start-api.sh"
 
-# Log the install
+# Log the install (version passed as $1 from PLG since PLG file isn't written yet at install time)
+INSTALL_VERSION="${1:-unknown}"
 php -r "
     require_once '$PLUGIN_DIR/include/helpers.php';
-    dms_log('Plugin installed/updated - version ' . DMS_VERSION);
+    dms_log('Plugin installed/updated - version $INSTALL_VERSION');
 "
 
 echo "Dead Man's Switch plugin installed successfully."

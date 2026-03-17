@@ -64,7 +64,6 @@ function dms_load_config() {
         'actions'                     => [
             'deletions' => [],
             'scripts'   => [],
-            'docker'    => ['stop' => [], 'remove' => [], 'volumes' => []],
         ],
         'pause_max_hours'             => 720,
     ];
@@ -563,28 +562,6 @@ function dms_execute_dry_run($config) {
             'exists'     => $exists,
             'executable' => $executable,
             'action'     => "Would execute: {$script['path']} (timeout: " . ($script['timeout'] ?? 300) . "s)",
-        ];
-    }
-
-    if (!empty($config['actions']['docker']['stop'])) {
-        $results[] = [
-            'type'       => 'docker_stop',
-            'containers' => $config['actions']['docker']['stop'],
-            'action'     => 'Would stop containers: ' . implode(', ', $config['actions']['docker']['stop']),
-        ];
-    }
-    if (!empty($config['actions']['docker']['remove'])) {
-        $results[] = [
-            'type'       => 'docker_remove',
-            'containers' => $config['actions']['docker']['remove'],
-            'action'     => 'Would remove containers: ' . implode(', ', $config['actions']['docker']['remove']),
-        ];
-    }
-    if (!empty($config['actions']['docker']['volumes'])) {
-        $results[] = [
-            'type'    => 'docker_volumes',
-            'volumes' => $config['actions']['docker']['volumes'],
-            'action'  => 'Would delete volumes: ' . implode(', ', $config['actions']['docker']['volumes']),
         ];
     }
 

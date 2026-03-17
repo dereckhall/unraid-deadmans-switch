@@ -39,13 +39,6 @@ $status_labels = [
 $status_color = $status_colors[$status] ?? '#6c757d';
 $status_label = $status_labels[$status] ?? strtoupper($status);
 
-// Docker containers list for action config (with timeout to avoid hanging UI)
-$docker_containers = [];
-$docker_volumes = [];
-if (file_exists('/var/run/docker.sock')) {
-    exec('timeout 3 docker ps -a --format "{{.Names}}" 2>/dev/null', $docker_containers);
-    exec('timeout 3 docker volume ls --format "{{.Name}}" 2>/dev/null', $docker_volumes);
-}
 ?>
 
 <link rel="stylesheet" href="<?autov('/plugins/deadman-switch/assets/style.css')?>">
@@ -279,53 +272,6 @@ if (file_exists('/var/run/docker.sock')) {
                 <?php endforeach; ?>
             </div>
             <button class="dms-btn dms-btn-sm" onclick="dmsAddScript()">+ Add Script</button>
-        </div>
-
-        <div class="dms-section">
-            <h3>Docker Containers</h3>
-            <p class="dms-help">Containers to stop/remove when triggered.</p>
-
-            <h4>Stop Containers</h4>
-            <div id="dms-docker-stop">
-                <?php foreach ($docker_containers as $container): ?>
-                <label class="dms-toggle">
-                    <input type="checkbox" class="dms-docker-stop-cb" value="<?= htmlspecialchars($container) ?>"
-                        <?= in_array($container, $config['actions']['docker']['stop']) ? 'checked' : '' ?>>
-                    <span><?= htmlspecialchars($container) ?></span>
-                </label>
-                <?php endforeach; ?>
-                <?php if (empty($docker_containers)): ?>
-                <p class="dms-muted">No Docker containers found.</p>
-                <?php endif; ?>
-            </div>
-
-            <h4>Remove Containers</h4>
-            <div id="dms-docker-remove">
-                <?php foreach ($docker_containers as $container): ?>
-                <label class="dms-toggle">
-                    <input type="checkbox" class="dms-docker-remove-cb" value="<?= htmlspecialchars($container) ?>"
-                        <?= in_array($container, $config['actions']['docker']['remove']) ? 'checked' : '' ?>>
-                    <span><?= htmlspecialchars($container) ?></span>
-                </label>
-                <?php endforeach; ?>
-                <?php if (empty($docker_containers)): ?>
-                <p class="dms-muted">No Docker containers found.</p>
-                <?php endif; ?>
-            </div>
-
-            <h4>Delete Volumes</h4>
-            <div id="dms-docker-volumes">
-                <?php foreach ($docker_volumes as $volume): ?>
-                <label class="dms-toggle">
-                    <input type="checkbox" class="dms-docker-volume-cb" value="<?= htmlspecialchars($volume) ?>"
-                        <?= in_array($volume, $config['actions']['docker']['volumes']) ? 'checked' : '' ?>>
-                    <span><?= htmlspecialchars($volume) ?></span>
-                </label>
-                <?php endforeach; ?>
-                <?php if (empty($docker_volumes)): ?>
-                <p class="dms-muted">No Docker volumes found.</p>
-                <?php endif; ?>
-            </div>
         </div>
 
         <div class="dms-actions-footer">

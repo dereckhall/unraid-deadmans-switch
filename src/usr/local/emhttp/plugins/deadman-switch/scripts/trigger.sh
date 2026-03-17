@@ -1,6 +1,6 @@
 #!/bin/bash
 # Dead Man's Switch - Trigger Script
-# Executes configured actions (deletions, scripts, docker)
+# Executes configured actions (deletions, scripts)
 
 CONFIG_DIR="/boot/config/plugins/deadman-switch"
 CONFIG_FILE="$CONFIG_DIR/config.json"
@@ -54,7 +54,14 @@ php -r "
     foreach (\$actions['deletions'] ?? [] as \$del) {
         \$path = \$del['path'];
         \$method = \$del['method'] ?? 'standard';
-        echo \"DELETE:\$method:\$path\n\";
+        \$matches = glob(\$path);
+        if (\$matches === false || empty(\$matches)) {
+            echo \"DELETE:\$method:\$path\n\";
+        } else {
+            foreach (\$matches as \$match) {
+                echo \"DELETE:\$method:\$match\n\";
+            }
+        }
     }
 " | while IFS=: read -r action method path; do
     if [ "$action" != "DELETE" ]; then continue; fi
@@ -64,34 +71,29 @@ php -r "
         continue
     fi
 
+    if [ ! -e "$path" ]; then
+        log "Path not found: $path" "WARN"
+        continue
+    fi
+
     log "Deleting: $path (method: $method)" "CRITICAL"
 
-    # Expand globs
-    shopt -s nullglob
-    for target in "$path"; do
-        if [ ! -e "$target" ]; then
-            log "Path not found: $target" "WARN"
-            continue
+    if [ "$method" = "secure" ]; then
+        if [ -f "$path" ]; then
+            shred -vfz -n 3 "$path" 2>> "$LOG_FILE" && rm -f "$path"
+        elif [ -d "$path" ]; then
+            find "$path" -type f -exec shred -vfz -n 3 {} \; 2>> "$LOG_FILE"
+            rm -rf "$path"
         fi
+    else
+        rm -rf "$path"
+    fi
 
-        if [ "$method" = "secure" ]; then
-            if [ -f "$target" ]; then
-                shred -vfz -n 3 "$target" 2>> "$LOG_FILE" && rm -f "$target"
-            elif [ -d "$target" ]; then
-                find "$target" -type f -exec shred -vfz -n 3 {} \; 2>> "$LOG_FILE"
-                rm -rf "$target"
-            fi
-        else
-            rm -rf "$target"
-        fi
-
-        if [ $? -eq 0 ]; then
-            log "Deleted: $target" "CRITICAL"
-        else
-            log "Failed to delete: $target" "ERROR"
-        fi
-    done
-    shopt -u nullglob
+    if [ $? -eq 0 ]; then
+        log "Deleted: $path" "CRITICAL"
+    else
+        log "Failed to delete: $path" "ERROR"
+    fi
 done
 
 # Execute custom scripts
@@ -129,49 +131,6 @@ php -r "
     else
         log "Script failed (exit $EXIT_CODE): $script_path" "ERROR"
     fi
-done
-
-# Docker actions
-php -r "
-    \$actions = json_decode('$ACTIONS_JSON', true);
-    \$docker = \$actions['docker'] ?? [];
-    echo 'STOP:' . implode(',', \$docker['stop'] ?? []) . \"\n\";
-    echo 'REMOVE:' . implode(',', \$docker['remove'] ?? []) . \"\n\";
-    echo 'VOLUMES:' . implode(',', \$docker['volumes'] ?? []) . \"\n\";
-" | while IFS=: read -r action items; do
-    [ -z "$items" ] && continue
-
-    IFS=',' read -ra LIST <<< "$items"
-    for item in "${LIST[@]}"; do
-        [ -z "$item" ] && continue
-
-        case "$action" in
-            STOP)
-                if [ "$DRY_RUN" = "1" ]; then
-                    log "[DRY RUN] Would stop container: $item" "WARN"
-                else
-                    log "Stopping container: $item" "CRITICAL"
-                    docker stop "$item" 2>> "$LOG_FILE"
-                fi
-                ;;
-            REMOVE)
-                if [ "$DRY_RUN" = "1" ]; then
-                    log "[DRY RUN] Would remove container: $item" "WARN"
-                else
-                    log "Removing container: $item" "CRITICAL"
-                    docker rm -f "$item" 2>> "$LOG_FILE"
-                fi
-                ;;
-            VOLUMES)
-                if [ "$DRY_RUN" = "1" ]; then
-                    log "[DRY RUN] Would delete volume: $item" "WARN"
-                else
-                    log "Deleting volume: $item" "CRITICAL"
-                    docker volume rm "$item" 2>> "$LOG_FILE"
-                fi
-                ;;
-        esac
-    done
 done
 
 # Update dry run completion flag (with file locking)

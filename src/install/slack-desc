@@ -3,8 +3,7 @@ deadman-switch: deadman-switch (Dead Man's Switch for Unraid)
 deadman-switch:
 deadman-switch: A plugin that requires periodic check-ins via the Unraid web UI.
 deadman-switch: If the user fails to check in within a configurable time period,
-deadman-switch: the plugin executes automated file deletion, custom scripts,
-deadman-switch: and Docker container actions.
+deadman-switch: the plugin executes automated file deletion and custom scripts.
 deadman-switch:
 deadman-switch: Features: Discord webhooks, Uptime Kuma monitoring, API endpoint,
 deadman-switch: dashboard widget, dry run mode, grace period, and more.

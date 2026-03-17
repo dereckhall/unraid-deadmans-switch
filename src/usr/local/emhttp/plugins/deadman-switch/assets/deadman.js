@@ -257,20 +257,10 @@ function dmsSaveActions() {
         }
     });
 
-    var dockerStop = [];
-    $('.dms-docker-stop-cb:checked').each(function() { dockerStop.push($(this).val()); });
-
-    var dockerRemove = [];
-    $('.dms-docker-remove-cb:checked').each(function() { dockerRemove.push($(this).val()); });
-
-    var dockerVolumes = [];
-    $('.dms-docker-volume-cb:checked').each(function() { dockerVolumes.push($(this).val()); });
-
     var data = {
         actions: {
             deletions: deletions,
-            scripts: scripts,
-            docker: { stop: dockerStop, remove: dockerRemove, volumes: dockerVolumes }
+            scripts: scripts
         }
     };
 

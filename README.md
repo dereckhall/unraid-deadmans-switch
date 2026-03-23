@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/images/deadman-switch-icon.png" width="200" />
+</p>
+
 # Dead Man's Switch for Unraid
 
 A dead man's switch plugin for Unraid that requires periodic check-ins. If you stop checking in, it triggers configurable actions — like deleting files or running scripts — after a deadline passes.

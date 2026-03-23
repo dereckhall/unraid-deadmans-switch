@@ -122,6 +122,63 @@ rest:
 5. If the deadline passes (plus grace period), configured trigger actions execute
 6. The API server self-heals — if the process dies, the cron job restarts it
 
+## Troubleshooting
+
+### API server not running
+
+The external API server on port 3801 should auto-start on install and self-heal via the cron job. If it's not running:
+
+```bash
+# Check if the process is alive
+ps aux | grep "external-api.php" | grep -v grep
+
+# Manually start it
+/usr/local/emhttp/plugins/deadman-switch/scripts/start-api.sh
+
+# Check for port conflicts
+lsof -i :3801
+```
+
+### Cron job not firing
+
+The plugin installs a cron file at `/boot/config/plugins/deadman-switch/deadman-switch.cron`. If notifications or countdown checks aren't happening:
+
+```bash
+# Verify the cron file exists and has content
+cat /boot/config/plugins/deadman-switch/deadman-switch.cron
+
+# Rebuild cron from the plugin's cron file
+/usr/local/sbin/update_cron
+```
+
+### Discord notifications not sending
+
+1. Verify your webhook URL is correct in the Notifications tab
+2. Use the **Test** button in the UI to send a test notification
+3. Check the Logs tab for any error messages
+4. Ensure your Unraid server has outbound internet access
+
+### Actions not triggering (or triggering unexpectedly)
+
+- Make sure **Dry Run** mode is off in the Settings tab if you want real execution
+- Use the **Dry Test** button on the Actions tab to preview what would happen
+- Glob patterns (`*`) do not match dotfiles/dotfolders — this is intentional for safety
+- Check the Logs tab for trigger execution details
+
+### Quick check-in link not working
+
+The one-click check-in URL in Discord notifications uses port 3801 and requires direct network access to your Unraid server. It won't work through reverse proxies that don't forward port 3801. Ensure the link IP/hostname is reachable from where you're clicking it.
+
+### Plugin not updating
+
+GitHub CDN can cache the PLG file. To force a fresh install:
+
+```bash
+curl -H 'Cache-Control: no-cache' -o /tmp/deadman-switch.plg \
+  https://raw.githubusercontent.com/dereckhall/unraid-deadmans-switch/main/plugin/deadman-switch.plg
+plugin install /tmp/deadman-switch.plg
+```
+
 ## License
 
-This project is provided as-is with no warranty. Use at your own risk.
+MIT License — see [LICENSE](LICENSE) for details.

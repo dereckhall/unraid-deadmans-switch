@@ -13,7 +13,7 @@ define('DMS_LOG_FILE', DMS_LOG_DIR . '/deadman.log');
 define('DMS_PLUGIN_DIR', '/usr/local/emhttp/plugins/deadman-switch');
 define('DMS_VERSION', (function() {
     $plg = '/boot/config/plugins/deadman-switch.plg';
-    if (file_exists($plg) && preg_match('/version="([^"]+)"/', @file_get_contents($plg, false, null, 0, 512), $m)) {
+    if (file_exists($plg) && preg_match('/PLUGIN[^>]+version="([^"]+)"/', @file_get_contents($plg, false, null, 0, 512), $m)) {
         return $m[1];
     }
     return 'unknown';

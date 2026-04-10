@@ -3,6 +3,5 @@
     "package_name": "deadman-switch",
     "author": "Dereck",
     "github": "dereckhall/unraid-deadmans-switch",
-    "min": "6.12.0",
-    "icon": "bomb"
+    "min": "6.12.0"
 }

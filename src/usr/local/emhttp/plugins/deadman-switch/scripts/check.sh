@@ -66,6 +66,26 @@ RESULT=$(php -r "
         exit;
     }
 
+    // Clock sanity check: system time should never be before last check-in
+    // Protects against BIOS battery failure / clock reset causing the switch to go inert
+    if (time() < strtotime(\$state['last_checkin']) - 300) {
+        if (\$state['last_notification_level'] !== 'clock_anomaly') {
+            \$sys_time = date('Y-m-d H:i:s');
+            \$checkin_time = date('Y-m-d H:i:s', strtotime(\$state['last_checkin']));
+            \$msg = \"\xE2\x9A\xA0\xEF\xB8\x8F Dead Man's Switch: System clock anomaly detected. \" .
+                    \"Clock (\$sys_time) is behind last check-in (\$checkin_time). \" .
+                    \"Timer cannot function correctly until clock is corrected.\";
+            foreach (\$config['webhooks'] as \$type => \$wh) {
+                if (!\$wh['enabled']) continue;
+                dms_send_webhook(\$type, \$wh, \$msg);
+            }
+            \$state['last_notification_level'] = 'clock_anomaly';
+            dms_save_state(\$state);
+        }
+        echo 'STATUS:clock_anomaly';
+        exit;
+    }
+
     \$remaining = dms_time_remaining(\$config, \$state);
     \$total = \$config['checkin_interval_days'] * 86400;
     \$warning_level = dms_get_warning_level(\$config, \$state);

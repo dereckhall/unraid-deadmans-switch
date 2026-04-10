@@ -4,7 +4,7 @@
 <PLUGIN
   name="deadman-switch"
   author="Dereck"
-  version="2026.03.17b"
+  version="2026.04.10a"
   launch="Settings/deadman-switch"
   pluginURL="https://raw.githubusercontent.com/dereckhall/unraid-deadmans-switch/main/plugin/deadman-switch.plg"
   icon="bomb"
@@ -15,6 +15,10 @@
 
 <CHANGES>
 <![CDATA[
+
+### 2026.04.10a
+
+Add system clock sanity check to prevent the dead man's switch from going inert if the BIOS battery dies or the clock resets backward. Detects the anomaly, sends a one-time webhook warning, and stays armed so it self-heals when NTP corrects the clock.
 
 ### 2026.03.17b
 

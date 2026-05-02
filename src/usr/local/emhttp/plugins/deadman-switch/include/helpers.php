@@ -493,7 +493,7 @@ function dms_send_uptime_kuma_heartbeat($config, $state) {
         $uk_status = 'down';
         $msg = 'Grace period active';
     } elseif ($days_left !== null && $days_left < $warning_days) {
-        $uk_status = 'down';
+        $uk_status = 'up';
         $msg = "{$days_left} days remaining - check in needed";
     } else {
         $uk_status = 'up';

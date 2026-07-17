@@ -98,24 +98,62 @@ The external API makes it easy to integrate with Home Assistant using REST senso
 </p>
 
 <details>
-<summary>Example REST sensor configuration</summary>
+<summary>Example REST sensor + check-in command</summary>
+
+Add to `configuration.yaml`, then restart Home Assistant (or reload YAML configuration):
 
 ```yaml
 rest:
   - resource: "http://YOUR_UNRAID_IP:3801/?action=status&key=YOUR_API_KEY"
     scan_interval: 300
     sensor:
-      - name: "Dead Man's Switch Status"
+      - name: "Dead Man's Switch"
         value_template: "{{ value_json.status }}"
         json_attributes:
-          - time_remaining
+          - armed
+          - warning_level
+          - days_remaining
+          - time_remaining_display
           - last_checkin
-          - deadline
-          - interval_days
-          - dry_run
+          - next_deadline
+
+rest_command:
+  dms_checkin:
+    url: "http://YOUR_UNRAID_IP:3801/?action=checkin&key=YOUR_API_KEY"
+    method: GET
 ```
 
 </details>
+
+### Check-in button
+
+The `rest_command` above powers a one-tap check-in from a Lovelace card. Add this card via **Dashboard → Edit → Add Card → Manual**:
+
+```yaml
+type: entities
+title: Dead Man's Switch
+entities:
+  - entity: sensor.dead_man_s_switch
+    name: Status
+  - type: attribute
+    entity: sensor.dead_man_s_switch
+    attribute: time_remaining_display
+    name: Time remaining
+  - type: attribute
+    entity: sensor.dead_man_s_switch
+    attribute: last_checkin
+    name: Last check-in
+footer:
+  type: buttons
+  entities:
+    - entity: sensor.dead_man_s_switch
+      name: CHECK IN NOW
+      tap_action:
+        action: call-service
+        service: rest_command.dms_checkin
+```
+
+Tapping **CHECK IN NOW** calls the check-in endpoint and resets your timer. The sensor refreshes on its next poll (every 5 minutes above); lower `scan_interval` for a faster update after checking in. You can fire the same `rest_command.dms_checkin` from an automation or an actionable mobile notification to get a check-in button right on your phone.
 
 ## How It Works
 

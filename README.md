@@ -98,24 +98,30 @@ The external API makes it easy to integrate with Home Assistant using REST senso
 </p>
 
 <details>
-<summary>Example REST sensor + check-in command</summary>
+<summary>REST sensor + check-in command</summary>
 
 Add to `configuration.yaml`, then restart Home Assistant (or reload YAML configuration):
 
 ```yaml
 rest:
-  - resource: "http://YOUR_UNRAID_IP:3801/?action=status&key=YOUR_API_KEY"
-    scan_interval: 300
+  - scan_interval: 60
+    resource: "http://YOUR_UNRAID_IP:3801/?action=status&key=YOUR_API_KEY"
+    method: GET
     sensor:
-      - name: "Dead Man's Switch"
+      - name: "DMS Status"
+        unique_id: "dms_status"
         value_template: "{{ value_json.status }}"
         json_attributes:
           - armed
+          - paused
+          - dry_run
           - warning_level
           - days_remaining
           - time_remaining_display
           - last_checkin
           - next_deadline
+          - elapsed_pct
+          - checkin_interval_days
 
 rest_command:
   dms_checkin:
@@ -125,35 +131,69 @@ rest_command:
 
 </details>
 
-### Check-in button
+### Status card and check-in button
 
-The `rest_command` above powers a one-tap check-in from a Lovelace card. Add this card via **Dashboard → Edit → Add Card → Manual**:
+Add these cards to your dashboard via **Dashboard → Edit → Add Card → Manual**. Stacking a few small cards gives a clean status readout plus a one-tap check-in.
+
+A markdown card turns the raw status (e.g. `armed_ok`) into a colored alert with the time remaining:
+
+```yaml
+type: markdown
+content: >
+  {% set s = states('sensor.dms_status') %}
+  {% set remaining = state_attr('sensor.dms_status', 'time_remaining_display') %}
+  {% set info = {
+    'armed_ok': {'label': 'OK - ' ~ remaining ~ ' remaining', 'type': 'success'},
+    'armed_reminder': {'label': 'Reminder - ' ~ remaining ~ ' remaining', 'type': 'warning'},
+    'armed_warning': {'label': 'Warning - ' ~ remaining ~ ' remaining', 'type': 'warning'},
+    'armed_critical': {'label': 'Critical - ' ~ remaining ~ ' remaining', 'type': 'error'},
+    'grace_period': {'label': 'Grace Period - ' ~ remaining ~ ' remaining', 'type': 'error'},
+    'triggered': {'label': 'TRIGGERED - deleted files', 'type': 'error'},
+    'paused': {'label': 'Paused - ' ~ remaining ~ ' remaining', 'type': 'success'},
+    'disarmed': {'label': 'Disarmed', 'type': 'success'}
+  } %}
+  {% set i = info.get(s, {'label': s, 'type': 'info'}) %}
+  <ha-alert alert-type="{{ i.type }}">
+  {{ i.label }}
+  </ha-alert>
+```
+
+An entities card shows the details:
 
 ```yaml
 type: entities
-title: Dead Man's Switch
 entities:
-  - entity: sensor.dead_man_s_switch
-    name: Status
-  - type: attribute
-    entity: sensor.dead_man_s_switch
+  - entity: sensor.dms_status
+    type: attribute
     attribute: time_remaining_display
-    name: Time remaining
-  - type: attribute
-    entity: sensor.dead_man_s_switch
+    name: Time Remaining
+    icon: mdi:timer-sand
+  - entity: sensor.dms_status
+    type: attribute
     attribute: last_checkin
-    name: Last check-in
-footer:
-  type: buttons
-  entities:
-    - entity: sensor.dead_man_s_switch
-      name: CHECK IN NOW
-      tap_action:
-        action: call-service
-        service: rest_command.dms_checkin
+    name: Last Check-in
+    icon: mdi:clock-check-outline
+  - entity: sensor.dms_status
+    type: attribute
+    attribute: next_deadline
+    name: Next Deadline
+    icon: mdi:clock-alert-outline
 ```
 
-Tapping **CHECK IN NOW** calls the check-in endpoint and resets your timer. The sensor refreshes on its next poll (every 5 minutes above); lower `scan_interval` for a faster update after checking in. You can fire the same `rest_command.dms_checkin` from an automation or an actionable mobile notification to get a check-in button right on your phone.
+And a button card for the check-in. It uses a confirmation prompt so an accidental tap won't reset the timer:
+
+```yaml
+type: button
+name: Check In
+icon: mdi:check-circle
+tap_action:
+  action: perform-action
+  perform_action: rest_command.dms_checkin
+  confirmation:
+    text: Are you sure you want to check in to the Dead Man's Switch?
+```
+
+Tap the button, confirm, and it hits the check-in endpoint and resets your timer. The sensor refreshes on its next poll (every 60 seconds above). You can fire the same `rest_command.dms_checkin` from an automation or an actionable mobile notification to get a check-in button right on your phone's lock screen when the timer runs low.
 
 ## How It Works
 

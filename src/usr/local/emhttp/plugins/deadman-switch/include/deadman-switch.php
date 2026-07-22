@@ -19,6 +19,7 @@ $grace_end = dms_get_grace_end($config, $state);
 $status_colors = [
     'disarmed'       => '#6c757d',
     'armed_ok'       => '#4caf50',
+    'armed_reminder' => '#ffc107',
     'armed_warning'  => '#ff9800',
     'armed_critical' => '#f44336',
     'grace_period'   => '#d32f2f',
@@ -29,6 +30,7 @@ $status_colors = [
 $status_labels = [
     'disarmed'       => 'DISARMED',
     'armed_ok'       => 'ARMED - OK',
+    'armed_reminder' => 'REMINDER',
     'armed_warning'  => 'WARNING',
     'armed_critical' => 'CRITICAL',
     'grace_period'   => 'GRACE PERIOD',
@@ -92,7 +94,7 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
                 </div>
                 <div class="dms-info-item">
                     <span class="dms-info-label">Check-in Method:</span>
-                    <span class="dms-info-value"><?= $state['last_checkin_method'] ?? 'N/A' ?></span>
+                    <span class="dms-info-value"><?= htmlspecialchars($state['last_checkin_method'] ?? 'N/A') ?></span>
                 </div>
                 <div class="dms-info-item">
                     <span class="dms-info-label">Deadline:</span>
@@ -218,7 +220,7 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
         <!-- Uptime Kuma -->
         <div class="dms-section">
             <h3>Uptime Kuma</h3>
-            <p class="dms-help">Push heartbeat to Uptime Kuma on every cron cycle. Reports "down" when fewer than the configured warning days remain.</p>
+            <p class="dms-help">Push heartbeat to Uptime Kuma on every cron cycle. Reports "down" during the grace period or when triggered; earlier warnings arrive as an "up" heartbeat with a warning message.</p>
             <div class="dms-webhook-config">
                 <label class="dms-toggle">
                     <input type="checkbox" id="cfg-uk-enabled" <?= $config['uptime_kuma']['enabled'] ? 'checked' : '' ?>>
@@ -230,7 +232,7 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
                 <label>Warning Threshold (days):
                     <input type="number" id="cfg-uk-warning-days" value="<?= $config['uptime_kuma']['warning_days'] ?>" min="1" max="365" class="dms-input dms-input-sm">
                 </label>
-                <p class="dms-help">When fewer than this many days remain, the heartbeat reports "down" so Uptime Kuma alerts you.</p>
+                <p class="dms-help">When fewer than this many days remain, the heartbeat message notes that a check-in is needed (the monitor stays "up" until the deadline actually passes).</p>
             </div>
         </div>
 
@@ -241,7 +243,7 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
     <div id="dms-tab-actions" class="dms-tab-content">
         <div class="dms-section">
             <h3>File/Directory Deletion</h3>
-            <p class="dms-help">Paths to delete when the switch triggers. Supports glob patterns.</p>
+            <p class="dms-help">Paths to delete when the switch triggers. Supports glob patterns. Note: "Secure" (shred) cannot guarantee unrecoverable deletion on SSDs, the flash drive, or btrfs/ZFS pools — wear leveling and copy-on-write may preserve old data.</p>
             <div id="dms-deletions-list">
                 <?php foreach ($config['actions']['deletions'] as $i => $deletion): ?>
                 <div class="dms-action-item" data-index="<?= $i ?>">
@@ -296,8 +298,9 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
                 <label>Grace Period (hours):
                     <input type="number" id="cfg-grace" value="<?= $config['grace_period_hours'] ?>" min="1" max="720" class="dms-input dms-input-sm">
                 </label>
-                <label>External URL:
-                    <input type="url" id="cfg-external-url" value="<?= htmlspecialchars($config['external_url']) ?>" class="dms-input" placeholder="https://unraid.mydomain.com (optional, for reverse proxy setups)">
+                <label>External API URL:
+                    <input type="url" id="cfg-external-url" value="<?= htmlspecialchars($config['external_url']) ?>" class="dms-input" placeholder="https://dms.mydomain.com (optional)">
+                    <span class="dms-help">Public URL that routes to the external API (port 3801), e.g. via reverse proxy or port forward. Used for check-in links in notifications so they work away from home. Leave blank to use the LAN address.</span>
                 </label>
                 <label>Cron Check Interval (minutes):
                     <input type="number" id="cfg-cron-interval" value="<?= $config['cron_interval_minutes'] ?>" min="5" max="1440" class="dms-input dms-input-sm">
@@ -331,7 +334,7 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
             </div>
             <?php if ($config['api_key']): ?>
             <?php
-                $api_base = dms_get_api_base();
+                $api_base = dms_get_api_base($config);
                 $ekey = htmlspecialchars($config['api_key']);
             ?>
             <p class="dms-help" style="margin-top:10px">External API on port <strong>3801</strong> (no Unraid login required, API key authenticates):</p>

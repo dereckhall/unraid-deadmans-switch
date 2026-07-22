@@ -4,12 +4,6 @@
 
 CONFIG_DIR="/boot/config/plugins/deadman-switch"
 STATE_FILE="$CONFIG_DIR/state.json"
-LOG_FILE="$CONFIG_DIR/logs/deadman.log"
-
-log() {
-    local level="${2:-INFO}"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $1" >> "$LOG_FILE"
-}
 
 if [ ! -f "$STATE_FILE" ]; then
     echo "Error: State file not found. Is the plugin installed?"
@@ -17,20 +11,14 @@ if [ ! -f "$STATE_FILE" ]; then
 fi
 
 METHOD="${1:-cli}"
-NOW=$(date -Iseconds)
 
-# Update state file using PHP for proper JSON handling
-php -r "
-    \$state = json_decode(file_get_contents('$STATE_FILE'), true);
-    \$state['last_checkin'] = '$NOW';
-    \$state['last_checkin_method'] = '$METHOD';
-    \$state['missed_count'] = 0;
-    \$state['last_notification_level'] = null;
-    \$state['grace_period_start'] = null;
-    array_unshift(\$state['checkin_history'], ['time' => '$NOW', 'method' => '$METHOD']);
-    \$state['checkin_history'] = array_slice(\$state['checkin_history'], 0, 10);
-    file_put_contents('$STATE_FILE', json_encode(\$state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-"
-
-log "Check-in recorded via $METHOD"
-echo "Check-in recorded at $NOW (method: $METHOD)"
+# The method reaches PHP via argv, never string interpolation
+if php -r '
+    require_once "/usr/local/emhttp/plugins/deadman-switch/include/helpers.php";
+    exit(dms_do_checkin($argv[1] ?? "cli") ? 0 : 1);
+' -- "$METHOD"; then
+    echo "Check-in recorded (method: $METHOD)"
+else
+    echo "ERROR: Check-in FAILED - state file was not updated" >&2
+    exit 1
+fi

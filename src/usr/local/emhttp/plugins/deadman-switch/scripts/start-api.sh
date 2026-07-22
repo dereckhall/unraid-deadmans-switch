@@ -18,8 +18,9 @@ if [ ! -f "$ROUTER" ]; then
     exit 1
 fi
 
-# Start PHP built-in server in the background
-nohup php -S 0.0.0.0:$PORT "$ROUTER" >> "$LOG_FILE" 2>&1 &
+# Start PHP built-in server in the background. Multiple workers so one
+# stalled connection can't block remote check-ins.
+nohup env PHP_CLI_SERVER_WORKERS=4 php -S 0.0.0.0:$PORT "$ROUTER" >> "$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"
 
 sleep 1

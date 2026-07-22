@@ -19,7 +19,12 @@ define('DMS_VERSION', (function() {
     return 'unknown';
 })());
 
-function dms_get_api_base() {
+function dms_get_api_base($config = null) {
+    if ($config === null) $config = dms_load_config();
+    // A configured external URL must route to the external API (port 3801),
+    // e.g. a reverse proxy or port forward; used so check-in links work off-LAN
+    $external = rtrim(trim($config['external_url'] ?? ''), '/');
+    if ($external !== '') return $external;
     $nginx = @parse_ini_file('/var/local/emhttp/nginx.ini');
     $host = $nginx['NGINX_LANIP'] ?? $nginx['NGINX_LANMDNS'] ?? 'localhost';
     return "http://$host:3801";
@@ -83,7 +88,55 @@ function dms_load_config() {
 
 function dms_save_config($config) {
     dms_ensure_dirs();
-    file_put_contents(DMS_CONFIG_FILE, json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX);
+    dms_write_json_atomic(DMS_CONFIG_FILE, $config);
+}
+
+// Write via temp file + rename so concurrent readers never see a truncated file
+function dms_write_json_atomic($file, $data) {
+    $tmp = $file . '.tmp.' . getmypid();
+    if (file_put_contents($tmp, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX) === false) {
+        return false;
+    }
+    if (!rename($tmp, $file)) {
+        @unlink($tmp);
+        return false;
+    }
+    return true;
+}
+
+// Serialized read-modify-write. $fn receives the current state and returns the
+// modified state. Uses a separate lock file because the data file is replaced
+// by rename() and a lock on a replaced inode would not serialize writers.
+function dms_update_state($fn) {
+    dms_ensure_dirs();
+    $lock = @fopen(DMS_STATE_FILE . '.lock', 'c');
+    if ($lock) flock($lock, LOCK_EX);
+    $state = dms_load_state();
+    $result = $fn($state);
+    if (is_array($result)) $state = $result;
+    $ok = dms_write_json_atomic(DMS_STATE_FILE, $state);
+    if ($lock) {
+        flock($lock, LOCK_UN);
+        fclose($lock);
+    }
+    if (!$ok) dms_log('Failed to write state file (flash full or read-only?)', 'ERROR');
+    return $ok ? $state : false;
+}
+
+function dms_update_config($fn) {
+    dms_ensure_dirs();
+    $lock = @fopen(DMS_CONFIG_FILE . '.lock', 'c');
+    if ($lock) flock($lock, LOCK_EX);
+    $config = dms_load_config();
+    $result = $fn($config);
+    if (is_array($result)) $config = $result;
+    $ok = dms_write_json_atomic(DMS_CONFIG_FILE, $config);
+    if ($lock) {
+        flock($lock, LOCK_UN);
+        fclose($lock);
+    }
+    if (!$ok) dms_log('Failed to write config file (flash full or read-only?)', 'ERROR');
+    return $ok ? $config : false;
 }
 
 function dms_load_state() {
@@ -119,7 +172,7 @@ function dms_load_state() {
 
 function dms_save_state($state) {
     dms_ensure_dirs();
-    file_put_contents(DMS_STATE_FILE, json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX);
+    dms_write_json_atomic(DMS_STATE_FILE, $state);
 }
 
 function dms_log($message, $level = 'INFO') {
@@ -199,20 +252,25 @@ function dms_generate_api_key() {
     return 'dms_' . bin2hex(random_bytes(20));
 }
 
-function dms_create_quick_checkin_token($state) {
+// $state param kept for caller compatibility but ignored: the token is added
+// to freshly loaded state under lock, so a caller's stale copy can never
+// clobber a check-in or another caller's token.
+function dms_create_quick_checkin_token($state = null) {
     $token = dms_generate_token(16);
-    $state['quick_checkin_tokens'][$token] = [
-        'created' => date('c'),
-        'expires' => date('c', time() + 86400),
-        'used'    => false,
-    ];
-    // Prune expired tokens
-    foreach ($state['quick_checkin_tokens'] as $t => $info) {
-        if (strtotime($info['expires']) < time()) {
-            unset($state['quick_checkin_tokens'][$t]);
+    dms_update_state(function($s) use ($token) {
+        $s['quick_checkin_tokens'][$token] = [
+            'created' => date('c'),
+            'expires' => date('c', time() + 72 * 3600),
+            'used'    => false,
+        ];
+        // Prune expired tokens
+        foreach ($s['quick_checkin_tokens'] as $t => $info) {
+            if (strtotime($info['expires']) < time()) {
+                unset($s['quick_checkin_tokens'][$t]);
+            }
         }
-    }
-    dms_save_state($state);
+        return $s;
+    });
     return $token;
 }
 
@@ -225,30 +283,44 @@ function dms_validate_quick_checkin_token($token, $state) {
 }
 
 function dms_use_quick_checkin_token($token, &$state) {
-    if (!dms_validate_quick_checkin_token($token, $state)) return false;
-    $state['quick_checkin_tokens'][$token]['used'] = true;
-    dms_save_state($state);
-    return true;
+    // Validate and mark used inside the locked update so a token can't be
+    // spent twice by concurrent requests
+    $ok = false;
+    dms_update_state(function($s) use ($token, &$ok) {
+        if (isset($s['quick_checkin_tokens'][$token])) {
+            $info = $s['quick_checkin_tokens'][$token];
+            if (!$info['used'] && strtotime($info['expires']) >= time()) {
+                $s['quick_checkin_tokens'][$token]['used'] = true;
+                $ok = true;
+            }
+        }
+        return $s;
+    });
+    return $ok;
 }
 
 function dms_do_checkin($method = 'web') {
-    $state = dms_load_state();
     $now = date('c');
+    $result = dms_update_state(function($state) use ($now, $method) {
+        $state['last_checkin'] = $now;
+        $state['last_checkin_method'] = $method;
+        $state['missed_count'] = 0;
+        $state['last_notification_level'] = null;
+        $state['grace_period_start'] = null;
 
-    $state['last_checkin'] = $now;
-    $state['last_checkin_method'] = $method;
-    $state['missed_count'] = 0;
-    $state['last_notification_level'] = null;
-    $state['grace_period_start'] = null;
+        // Add to history (keep last 10)
+        array_unshift($state['checkin_history'], [
+            'time'   => $now,
+            'method' => $method,
+        ]);
+        $state['checkin_history'] = array_slice($state['checkin_history'], 0, 10);
+        return $state;
+    });
 
-    // Add to history (keep last 10)
-    array_unshift($state['checkin_history'], [
-        'time'   => $now,
-        'method' => $method,
-    ]);
-    $state['checkin_history'] = array_slice($state['checkin_history'], 0, 10);
-
-    dms_save_state($state);
+    if ($result === false) {
+        dms_log("Check-in via $method FAILED to write state", 'ERROR');
+        return false;
+    }
     dms_log("Check-in recorded via $method");
     return true;
 }
@@ -273,8 +345,8 @@ function dms_render_template($template, $config, $state) {
     $hours = $remaining ? max(0, round($remaining / 3600)) : 0;
     $status = dms_get_status($config, $state);
 
-    $api_base = dms_get_api_base();
-    $token = dms_create_quick_checkin_token($state);
+    $api_base = dms_get_api_base($config);
+    $token = dms_create_quick_checkin_token();
     $checkin_link = "$api_base/?action=quickcheckin&token=$token";
 
     $vars = [
@@ -387,8 +459,8 @@ function dms_build_discord_embed($config, $state) {
     }
 
     if ($state['armed'] && !$state['triggered']) {
-        $api_base = dms_get_api_base();
-        $token = dms_create_quick_checkin_token($state);
+        $api_base = dms_get_api_base($config);
+        $token = dms_create_quick_checkin_token();
         $checkin_link = "$api_base/?action=quickcheckin&token=$token";
         $fields[] = ['name' => 'Check In', 'value' => "[Click here to check in]($checkin_link)", 'inline' => false];
     }
@@ -500,12 +572,16 @@ function dms_send_uptime_kuma_heartbeat($config, $state) {
         $msg = $days_left !== null ? "{$days_left} days remaining" : 'OK';
     }
 
-    // Replace status/msg/ping values in the pasted Uptime Kuma push URL
-    $url = $uk['push_url'];
+    // Rebuild the query string so status/msg/ping are always set, even when
+    // the pasted push URL has no query parameters at all (a bare URL would
+    // otherwise default to "up" on the Kuma side and never alert)
     $ping_val = $days_left !== null ? round($days_left * 24 * 60) : '';
-    $url = preg_replace('/([?&])status=[^&]*/', '${1}status=' . $uk_status, $url);
-    $url = preg_replace('/([?&])msg=[^&]*/', '${1}msg=' . urlencode($msg), $url);
-    $url = preg_replace('/([?&])ping=[^&]*/', '${1}ping=' . urlencode($ping_val), $url);
+    $parts = explode('?', $uk['push_url'], 2);
+    parse_str($parts[1] ?? '', $params);
+    $params['status'] = $uk_status;
+    $params['msg'] = $msg;
+    $params['ping'] = $ping_val;
+    $url = $parts[0] . '?' . http_build_query($params);
 
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -526,8 +602,11 @@ function dms_update_cron($minutes = 60) {
     $script = DMS_PLUGIN_DIR . '/scripts/check.sh';
     $log = DMS_CONFIG_DIR . '/logs/cron.log';
 
-    if ($minutes == 60) {
-        $schedule = "0 * * * *";
+    if ($minutes >= 60) {
+        // */N in the minutes field is wrong past 59 (it would only match
+        // minute 0) — schedule on the hour instead
+        $hours = max(1, (int)round($minutes / 60));
+        $schedule = ($hours === 1) ? "0 * * * *" : "0 */$hours * * *";
     } else {
         $schedule = "*/$minutes * * * *";
     }

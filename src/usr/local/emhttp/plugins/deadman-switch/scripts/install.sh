@@ -36,8 +36,15 @@ if [ -f "$CONFIG_DIR/config.json" ]; then
     " 2>/dev/null)
     [ -z "$CRON_MINUTES" ] && CRON_MINUTES=60
 
-    if [ "$CRON_MINUTES" = "60" ]; then
-        echo "0 * * * * $PLUGIN_DIR/scripts/check.sh >> $CONFIG_DIR/logs/cron.log 2>&1" > "$CRON_FILE"
+    # */N in the minutes field is wrong past 59 — schedule on the hour instead
+    if [ "$CRON_MINUTES" -ge 60 ] 2>/dev/null; then
+        CRON_HOURS=$(( (CRON_MINUTES + 30) / 60 ))
+        [ "$CRON_HOURS" -lt 1 ] && CRON_HOURS=1
+        if [ "$CRON_HOURS" = "1" ]; then
+            echo "0 * * * * $PLUGIN_DIR/scripts/check.sh >> $CONFIG_DIR/logs/cron.log 2>&1" > "$CRON_FILE"
+        else
+            echo "0 */$CRON_HOURS * * * $PLUGIN_DIR/scripts/check.sh >> $CONFIG_DIR/logs/cron.log 2>&1" > "$CRON_FILE"
+        fi
     else
         echo "*/$CRON_MINUTES * * * * $PLUGIN_DIR/scripts/check.sh >> $CONFIG_DIR/logs/cron.log 2>&1" > "$CRON_FILE"
     fi

@@ -27,131 +27,118 @@ else
     log "=== TRIGGER ACTIVATED - EXECUTING ACTIONS ===" "CRITICAL"
 fi
 
-# Mark as triggered (with file locking)
-php -r "
-    \$f = fopen('$STATE_FILE', 'c+');
-    if (flock(\$f, LOCK_EX)) {
-        \$state = json_decode(stream_get_contents(\$f), true);
-        \$state['triggered'] = true;
-        \$state['trigger_time'] = date('c');
-        ftruncate(\$f, 0);
-        rewind(\$f);
-        fwrite(\$f, json_encode(\$state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-        fflush(\$f);
-        flock(\$f, LOCK_UN);
-    }
-    fclose(\$f);
-"
+# Mark as triggered before running actions so a long action list can't cause
+# repeat triggers on later cron cycles
+php << 'PHPEOF'
+<?php
+require_once '/usr/local/emhttp/plugins/deadman-switch/include/helpers.php';
+dms_update_state(function($s) {
+    $s['triggered'] = true;
+    $s['trigger_time'] = date('c');
+    return $s;
+});
+PHPEOF
 
-# Read actions from config
-ACTIONS_JSON=$(php -r "\$c = json_decode(file_get_contents('$CONFIG_FILE'), true); echo json_encode(\$c['actions']);")
+# Execute all actions from PHP. The quoted heredoc means no shell interpolation:
+# paths with quotes, apostrophes, colons, or spaces reach PHP intact, and
+# escapeshellarg() protects the commands PHP runs.
+php << 'PHPEOF'
+<?php
+require_once '/usr/local/emhttp/plugins/deadman-switch/include/helpers.php';
 
-# Execute file deletions
-php -r "
-    \$actions = json_decode('$ACTIONS_JSON', true);
-    \$dry = '$DRY_RUN' === '1';
+$config = dms_load_config();
+$dry = !empty($config['dry_run']);
+$log_arg = escapeshellarg(DMS_LOG_FILE);
+$failures = 0;
 
-    foreach (\$actions['deletions'] ?? [] as \$del) {
-        \$path = \$del['path'];
-        \$method = \$del['method'] ?? 'standard';
-        \$matches = glob(\$path);
-        if (\$matches === false || empty(\$matches)) {
-            echo \"DELETE:\$method:\$path\n\";
-        } else {
-            foreach (\$matches as \$match) {
-                echo \"DELETE:\$method:\$match\n\";
+foreach ($config['actions']['deletions'] ?? [] as $del) {
+    $method = $del['method'] ?? 'standard';
+    $matches = glob($del['path']);
+    if (empty($matches)) $matches = [$del['path']];
+
+    foreach ($matches as $path) {
+        if ($dry) {
+            dms_log("[DRY RUN] Would delete: $path (method: $method)", 'WARN');
+            continue;
+        }
+        if (!file_exists($path) && !is_link($path)) {
+            dms_log("Path not found: $path", 'WARN');
+            continue;
+        }
+
+        dms_log("Deleting: $path (method: $method)", 'CRITICAL');
+        $arg = escapeshellarg($path);
+
+        if ($method === 'secure') {
+            if (is_file($path)) {
+                exec("shred -vfz -n 3 $arg >> $log_arg 2>&1 && rm -f $arg");
+            } else {
+                // -H follows a symlinked start path so its contents are
+                // shredded rather than silently skipped
+                exec("find -H $arg -type f -exec shred -vfz -n 3 {} \\; >> $log_arg 2>&1");
+                exec("rm -rf $arg >> $log_arg 2>&1");
             }
+        } else {
+            exec("rm -rf $arg >> $log_arg 2>&1");
+        }
+
+        clearstatcache(true, $path);
+        if (!file_exists($path) && !is_link($path)) {
+            dms_log("Deleted: $path", 'CRITICAL');
+        } else {
+            dms_log("Failed to delete: $path", 'ERROR');
+            $failures++;
         }
     }
-" | while IFS=: read -r action method path; do
-    if [ "$action" != "DELETE" ]; then continue; fi
+}
 
-    if [ "$DRY_RUN" = "1" ]; then
-        log "[DRY RUN] Would delete: $path (method: $method)" "WARN"
-        continue
-    fi
+foreach ($config['actions']['scripts'] ?? [] as $script) {
+    $path = $script['path'] ?? '';
+    if ($path === '') continue;
+    $timeout = intval($script['timeout'] ?? 300);
 
-    if [ ! -e "$path" ]; then
-        log "Path not found: $path" "WARN"
-        continue
-    fi
-
-    log "Deleting: $path (method: $method)" "CRITICAL"
-
-    if [ "$method" = "secure" ]; then
-        if [ -f "$path" ]; then
-            shred -vfz -n 3 "$path" 2>> "$LOG_FILE" && rm -f "$path"
-        elif [ -d "$path" ]; then
-            find "$path" -type f -exec shred -vfz -n 3 {} \; 2>> "$LOG_FILE"
-            rm -rf "$path"
-        fi
-    else
-        rm -rf "$path"
-    fi
-
-    if [ $? -eq 0 ]; then
-        log "Deleted: $path" "CRITICAL"
-    else
-        log "Failed to delete: $path" "ERROR"
-    fi
-done
-
-# Execute custom scripts
-php -r "
-    \$actions = json_decode('$ACTIONS_JSON', true);
-    foreach (\$actions['scripts'] ?? [] as \$script) {
-        echo \$script['path'] . ':' . (\$script['timeout'] ?? 300) . \"\n\";
+    if ($dry) {
+        dms_log("[DRY RUN] Would execute: $path (timeout: {$timeout}s)", 'WARN');
+        continue;
     }
-" | while IFS=: read -r script_path timeout; do
-    [ -z "$script_path" ] && continue
+    if (!is_file($path)) {
+        dms_log("Script not found: $path", 'ERROR');
+        $failures++;
+        continue;
+    }
+    if (!is_executable($path)) {
+        dms_log("Script not executable (chmod +x to enable): $path", 'ERROR');
+        $failures++;
+        continue;
+    }
 
-    if [ "$DRY_RUN" = "1" ]; then
-        log "[DRY RUN] Would execute: $script_path (timeout: ${timeout}s)" "WARN"
-        continue
-    fi
+    dms_log("Executing script: $path (timeout: {$timeout}s)", 'CRITICAL');
+    exec('timeout ' . $timeout . ' bash ' . escapeshellarg($path) . " >> $log_arg 2>&1", $out, $code);
 
-    if [ ! -f "$script_path" ]; then
-        log "Script not found: $script_path" "ERROR"
-        continue
-    fi
+    if ($code === 0) {
+        dms_log("Script completed: $path", 'CRITICAL');
+    } elseif ($code === 124) {
+        dms_log("Script timed out: $path", 'ERROR');
+        $failures++;
+    } else {
+        dms_log("Script failed (exit $code): $path", 'ERROR');
+        $failures++;
+    }
+}
 
-    if [ ! -x "$script_path" ]; then
-        log "Script not executable: $script_path" "ERROR"
-        continue
-    fi
+if ($dry) {
+    dms_update_config(function($c) {
+        $c['has_completed_dry_run'] = true;
+        return $c;
+    });
+    dms_log('=== DRY RUN COMPLETE ===', 'WARN');
+} elseif ($failures > 0) {
+    dms_log("=== ACTIONS COMPLETED WITH $failures FAILURE(S) - CHECK LOG ===", 'ERROR');
+} else {
+    dms_log('=== ALL ACTIONS EXECUTED ===', 'CRITICAL');
+}
+PHPEOF
 
-    log "Executing script: $script_path (timeout: ${timeout}s)" "CRITICAL"
-    timeout "$timeout" bash "$script_path" >> "$LOG_FILE" 2>&1
-    EXIT_CODE=$?
-
-    if [ $EXIT_CODE -eq 0 ]; then
-        log "Script completed: $script_path" "CRITICAL"
-    elif [ $EXIT_CODE -eq 124 ]; then
-        log "Script timed out: $script_path" "ERROR"
-    else
-        log "Script failed (exit $EXIT_CODE): $script_path" "ERROR"
-    fi
-done
-
-# Update dry run completion flag (with file locking)
-if [ "$DRY_RUN" = "1" ]; then
-    php -r "
-        \$f = fopen('$CONFIG_FILE', 'c+');
-        if (flock(\$f, LOCK_EX)) {
-            \$c = json_decode(stream_get_contents(\$f), true);
-            \$c['has_completed_dry_run'] = true;
-            ftruncate(\$f, 0);
-            rewind(\$f);
-            fwrite(\$f, json_encode(\$c, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-            fflush(\$f);
-            flock(\$f, LOCK_UN);
-        }
-        fclose(\$f);
-    "
-    log "=== DRY RUN COMPLETE ===" "WARN"
-else
-    log "=== ALL ACTIONS EXECUTED ===" "CRITICAL"
-fi
-
-# Send final notification
-"$SCRIPT_DIR/notify.sh" "Dead Man's Switch has been triggered. All configured actions have been executed." "CRITICAL"
+# Send final notification (state is now triggered, so the rendered message
+# and embed report the trigger accurately)
+"$SCRIPT_DIR/notify.sh" "triggered"

@@ -109,7 +109,7 @@ function dmsDisarm() {
 
 // Pause/Unpause
 function dmsPause() {
-    var hours = prompt('Pause for how many hours?', '24');
+    var hours = prompt('Pause for how many hours? The countdown is frozen while paused - the deadline moves out by the time spent paused.', '24');
     if (!hours) return;
     dmsPost('pause', { hours: hours }).done(function(data) {
         if (data.success) {

@@ -8,7 +8,7 @@ require_once __DIR__ . '/helpers.php';
 // CORS headers for Home Assistant and other clients
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type');
+header('Access-Control-Allow-Headers: Content-Type, X-Api-Key');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
@@ -18,7 +18,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 header('Content-Type: application/json');
 
 $action = $_GET['action'] ?? '';
-$key = $_GET['key'] ?? '';
+// Prefer the X-Api-Key header: keys in query strings end up in server logs
+$key = $_SERVER['HTTP_X_API_KEY'] ?? ($_GET['key'] ?? '');
 $token = $_GET['token'] ?? '';
 
 $config = dms_load_config();
@@ -37,7 +38,7 @@ if (!in_array($action, array_merge($public_actions, $key_actions, $token_actions
 
 // Validate API key for key-protected actions
 if (in_array($action, $key_actions)) {
-    if (!$config['api_key'] || $key !== $config['api_key']) {
+    if (!$config['api_key'] || !hash_equals((string)$config['api_key'], (string)$key)) {
         http_response_code(401);
         echo json_encode(['error' => 'Invalid API key']);
         exit;

@@ -10,11 +10,26 @@ header('Content-Type: application/json');
 // By the time we reach this code, CSRF is already validated for POST requests.
 
 $action = $_GET['action'] ?? ($_POST['action'] ?? '');
-$key = $_GET['key'] ?? '';
+$key = $_SERVER['HTTP_X_API_KEY'] ?? ($_GET['key'] ?? '');
 $token = $_GET['token'] ?? '';
+
+// Unraid's CSRF check only covers POST, so mutating actions must not be
+// reachable via GET (a bare link could otherwise disarm the switch)
+$mutating_actions = ['arm', 'disarm', 'pause', 'unpause', 'web_checkin',
+                     'save_config', 'generate_api_key', 'test_webhook',
+                     'dry_run', 'clear_logs'];
+if (in_array($action, $mutating_actions) && $_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['error' => 'This action requires POST']);
+    exit;
+}
 
 $config = dms_load_config();
 $state = dms_load_state();
+
+function dms_valid_api_key($config, $key) {
+    return $config['api_key'] && hash_equals((string)$config['api_key'], (string)$key);
+}
 
 switch ($action) {
     case 'health':
@@ -22,7 +37,7 @@ switch ($action) {
         break;
 
     case 'status':
-        if (!$config['api_key'] || $key !== $config['api_key']) {
+        if (!dms_valid_api_key($config, $key)) {
             http_response_code(401);
             echo json_encode(['error' => 'Invalid API key']);
             break;
@@ -70,7 +85,7 @@ switch ($action) {
         break;
 
     case 'checkin':
-        if (!$config['api_key'] || $key !== $config['api_key']) {
+        if (!dms_valid_api_key($config, $key)) {
             http_response_code(401);
             echo json_encode(['error' => 'Invalid API key']);
             break;
@@ -122,49 +137,76 @@ switch ($action) {
             echo json_encode(['success' => false, 'message' => 'Must complete a dry run before arming']);
             break;
         }
-        $state['armed'] = true;
-        $state['triggered'] = false;
-        $state['trigger_time'] = null;
-        $state['grace_period_start'] = null;
-        $state['missed_count'] = 0;
-        $state['last_notification_level'] = null;
-        $state['last_checkin'] = date('c');
-        $state['checkin_history'][] = ['time' => date('c'), 'method' => 'arm'];
-        dms_save_state($state);
+        $now = date('c');
+        dms_update_state(function($s) use ($now) {
+            $s['armed'] = true;
+            $s['triggered'] = false;
+            $s['trigger_time'] = null;
+            $s['grace_period_start'] = null;
+            $s['missed_count'] = 0;
+            $s['last_notification_level'] = null;
+            $s['last_checkin'] = $now;
+            $s['paused'] = false;
+            $s['pause_start'] = null;
+            $s['pause_expires'] = null;
+            array_unshift($s['checkin_history'], ['time' => $now, 'method' => 'arm']);
+            $s['checkin_history'] = array_slice($s['checkin_history'], 0, 10);
+            return $s;
+        });
         dms_log("Switch ARMED");
         echo json_encode(['success' => true]);
         break;
 
     case 'disarm':
-        $state['armed'] = false;
-        $state['triggered'] = false;
-        $state['trigger_time'] = null;
-        $state['grace_period_start'] = null;
-        $state['missed_count'] = 0;
-        $state['last_notification_level'] = null;
-        dms_save_state($state);
+        dms_update_state(function($s) {
+            $s['armed'] = false;
+            $s['triggered'] = false;
+            $s['trigger_time'] = null;
+            $s['grace_period_start'] = null;
+            $s['missed_count'] = 0;
+            $s['last_notification_level'] = null;
+            return $s;
+        });
         dms_log("Switch DISARMED");
         echo json_encode(['success' => true]);
         break;
 
     case 'pause':
-        $hours = intval($_POST['hours'] ?? ($_GET['hours'] ?? 24));
+        $hours = intval($_POST['hours'] ?? 24);
         $max = $config['pause_max_hours'];
         if ($hours > $max) $hours = $max;
-        $state['paused'] = true;
-        $state['pause_start'] = date('c');
-        $state['pause_expires'] = date('c', time() + ($hours * 3600));
-        dms_save_state($state);
+        if ($hours < 1) $hours = 1;
+        $state = dms_update_state(function($s) use ($hours) {
+            $s['paused'] = true;
+            $s['pause_start'] = date('c');
+            $s['pause_expires'] = date('c', time() + ($hours * 3600));
+            return $s;
+        });
+        if (!is_array($state)) {
+            http_response_code(500);
+            echo json_encode(['success' => false, 'error' => 'Failed to write state file']);
+            break;
+        }
         dms_log("Timer PAUSED for $hours hours");
-        echo json_encode(['success' => true, 'pause_expires' => $state['pause_expires']]);
+        echo json_encode(['success' => true, 'pause_expires' => $state['pause_expires'] ?? null]);
         break;
 
     case 'unpause':
-        $state['paused'] = false;
-        $state['pause_start'] = null;
-        $state['pause_expires'] = null;
-        dms_save_state($state);
-        dms_log("Timer UNPAUSED");
+        dms_update_state(function($s) {
+            // The countdown is frozen while paused: credit the pause duration
+            // to last_checkin so the deadline moves out by the time spent paused
+            if ($s['paused'] && $s['pause_start'] && $s['last_checkin']) {
+                $paused_secs = time() - strtotime($s['pause_start']);
+                if ($paused_secs > 0) {
+                    $s['last_checkin'] = date('c', min(time(), strtotime($s['last_checkin']) + $paused_secs));
+                }
+            }
+            $s['paused'] = false;
+            $s['pause_start'] = null;
+            $s['pause_expires'] = null;
+            return $s;
+        });
+        dms_log("Timer UNPAUSED (deadline extended by pause duration)");
         echo json_encode(['success' => true]);
         break;
 
@@ -172,14 +214,50 @@ switch ($action) {
         // Accept JSON config data via json_data form field
         // (Unraid's CSRF check requires form-encoded POST, so JSON is sent as a field)
         $input = json_decode($_POST['json_data'] ?? '', true);
-        if (!$input) {
+        if (!is_array($input)) {
             http_response_code(400);
             echo json_encode(['error' => 'Invalid input']);
             break;
         }
         $old_cron = $config['cron_interval_minutes'] ?? 60;
-        $config = array_replace_recursive($config, $input);
-        dms_save_config($config);
+        $old_interval = $config['checkin_interval_days'];
+        $config = dms_update_config(function($c) use ($input) {
+            $c = array_replace_recursive($c, $input);
+            // List-valued keys must replace wholesale: a recursive merge keys
+            // numeric arrays by index, so entries removed in the UI would
+            // survive the save (and still be deleted on trigger)
+            if (isset($input['actions']['deletions']) && is_array($input['actions']['deletions'])) {
+                $c['actions']['deletions'] = array_values($input['actions']['deletions']);
+            }
+            if (isset($input['actions']['scripts']) && is_array($input['actions']['scripts'])) {
+                $c['actions']['scripts'] = array_values($input['actions']['scripts']);
+            }
+            // Clamp numeric settings server-side: a cleared UI field arrives
+            // as null and would otherwise zero the interval, making the
+            // deadline equal to the last check-in (instant grace period)
+            $c['checkin_interval_days'] = max(1, min(365, intval($c['checkin_interval_days'] ?? 0) ?: 30));
+            $c['grace_period_hours']    = max(1, min(720, intval($c['grace_period_hours'] ?? 0) ?: 48));
+            $c['cron_interval_minutes'] = max(5, min(1440, intval($c['cron_interval_minutes'] ?? 0) ?: 60));
+            $c['pause_max_hours']       = max(1, min(8760, intval($c['pause_max_hours'] ?? 0) ?: 720));
+            foreach (['reminder' => 50, 'warning' => 75, 'critical' => 90, 'last_chance' => 95] as $t => $def) {
+                $c['warning_thresholds'][$t] = max(1, min(100, intval($c['warning_thresholds'][$t] ?? 0) ?: $def));
+            }
+            return $c;
+        });
+        if (!is_array($config)) {
+            http_response_code(500);
+            echo json_encode(['error' => 'Failed to write config file (flash full or read-only?)']);
+            break;
+        }
+
+        // A changed interval shifts the warning thresholds; clear the recorded
+        // notification level so a now-lower level isn't suppressed forever
+        if (($config['checkin_interval_days'] ?? $old_interval) != $old_interval) {
+            dms_update_state(function($s) {
+                $s['last_notification_level'] = null;
+                return $s;
+            });
+        }
 
         // Update cron schedule if interval changed
         $new_cron = $config['cron_interval_minutes'] ?? 60;
@@ -192,10 +270,13 @@ switch ($action) {
         break;
 
     case 'generate_api_key':
-        $config['api_key'] = dms_generate_api_key();
-        dms_save_config($config);
+        $new_key = dms_generate_api_key();
+        dms_update_config(function($c) use ($new_key) {
+            $c['api_key'] = $new_key;
+            return $c;
+        });
         dms_log("New API key generated");
-        echo json_encode(['success' => true, 'api_key' => $config['api_key']]);
+        echo json_encode(['success' => true, 'api_key' => $new_key]);
         break;
 
     case 'test_webhook':
@@ -206,14 +287,16 @@ switch ($action) {
 
     case 'dry_run':
         $result = dms_execute_dry_run($config);
-        $config['has_completed_dry_run'] = true;
-        dms_save_config($config);
+        dms_update_config(function($c) {
+            $c['has_completed_dry_run'] = true;
+            return $c;
+        });
         echo json_encode(['success' => true, 'results' => $result]);
         break;
 
     case 'get_state':
         // Require API key - this endpoint exposes internal state
-        if (!$config['api_key'] || $key !== $config['api_key']) {
+        if (!dms_valid_api_key($config, $key)) {
             http_response_code(401);
             echo json_encode(['error' => 'Invalid API key']);
             break;
@@ -236,7 +319,6 @@ switch ($action) {
         break;
 
     case 'clear_logs':
-        // clear_logs is POST-only, so Unraid CSRF protects it already
         if (file_exists(DMS_LOG_FILE)) {
             file_put_contents(DMS_LOG_FILE, '');
         }

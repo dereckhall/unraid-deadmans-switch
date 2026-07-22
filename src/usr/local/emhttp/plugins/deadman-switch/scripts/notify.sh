@@ -43,15 +43,25 @@ function send_webhook_with_retry($type, $webhook_config, $message, $config, $sta
     return false;
 }
 
+$enabled = 0;
+$succeeded = 0;
 foreach ($config['webhooks'] as $type => $wh) {
     if (!$wh['enabled']) continue;
-    send_webhook_with_retry($type, $wh, $message, $config, $state, $max_retries, $base_delay);
+    $enabled++;
+    if (send_webhook_with_retry($type, $wh, $message, $config, $state, $max_retries, $base_delay)) {
+        $succeeded++;
+    }
 }
+
+// Exit nonzero only when every enabled channel failed, so the caller knows
+// the notification never went out and can retry next cycle
+exit(($enabled === 0 || $succeeded > 0) ? 0 : 1);
 PHPEOF
 
 RESULT=$?
 if [ $RESULT -eq 0 ]; then
     log "Notification dispatch complete (level: $LEVEL)"
 else
-    log "Notification dispatch encountered errors (level: $LEVEL)" "ERROR"
+    log "Notification dispatch failed on all channels (level: $LEVEL)" "ERROR"
 fi
+exit $RESULT

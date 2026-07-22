@@ -18,25 +18,30 @@
 
 ### 2026.07.22a
 
-Big batch of reliability and security fixes from a full code audit.
+Reliability and security fixes from a full code audit.
 
-**The scary ones:**
-- Removing a deletion path (or script) in the UI didn't actually remove it from the saved config — it would still get wiped on trigger
-- A path with an apostrophe or colon broke trigger.sh and it would execute *nothing* while logging "ALL ACTIONS EXECUTED"
-- arm/disarm/pause/config endpoints worked over GET, which skips Unraid's CSRF check — a bare link could disarm the switch. POST-only now
-- State writes weren't atomic or locked: a slow webhook retry could clobber a fresh check-in, and quick check-in tokens overwrote each other (custom webhook links were dead if Discord was also enabled)
+**Bug fixes:**
+- Removing a deletion path or script in the UI didn't actually remove it from the saved config, so it would still be deleted when the switch triggered
+- Paths containing an apostrophe or colon broke the trigger script. It would execute nothing but still log "ALL ACTIONS EXECUTED"
+- The arm, disarm, pause, and config endpoints accepted GET requests, which bypass Unraid's CSRF protection. They now require POST
+- State file writes were not atomic or locked. A slow webhook retry could overwrite a fresh check-in, and quick check-in tokens could overwrite each other (custom webhook check-in links were broken whenever Discord was also enabled)
+- Uptime Kuma pushes now work with a bare push URL. Previously a URL without query parameters always reported "up", even during the grace period
+- Cron check intervals over 59 minutes never ran on the configured schedule
+- Clearing a number field in settings could save it as empty and zero out the deadline
 
 **Behavior changes:**
-- Pause actually freezes the countdown now (an expired long pause used to dump you straight into a trigger with zero warnings)
-- Warnings only mark themselves sent after delivery succeeds, so failed sends retry next cron cycle
-- The double-miss "first miss" alert no longer renders as a green all-clear, and the timer only resets once it's delivered
-- Uptime Kuma pushes work with a bare push URL (used to silently report "up" forever)
-- The External URL setting is now used for notification check-in links, so they work away from home
+- Pausing now freezes the countdown. Previously the clock kept running, and a long pause could expire directly into a trigger with no warnings sent
+- Warning notifications are only marked as sent after delivery succeeds, so failed sends are retried on the next cron cycle
+- The double-miss "first miss" alert is now a clear warning instead of looking like an all-clear, and the timer only resets once the alert is delivered
+- The External URL setting is now used for check-in links in notifications, so they work when you're away from home
 
-**Smaller stuff:**
-- API key via X-Api-Key header, hash_equals comparison
-- 4 workers on the port 3801 server so one stalled connection can't block remote check-ins
-- Cron intervals over 59 minutes fixed, cleared number fields no longer zero the deadline, log rotation on /boot, 72h check-in tokens, reminder status color, shred caveat in the UI
+**Other improvements:**
+- The API key can be sent via the X-Api-Key header, and key comparison uses hash_equals
+- The port 3801 API server now runs 4 workers, so one stalled connection can't block remote check-ins
+- Log rotation for the log files on the flash drive
+- Quick check-in links are now valid for 72 hours instead of 24
+- The reminder status now has its own color in the UI
+- Added a note in the UI about secure delete limitations on SSDs and flash storage
 
 ### 2026.05.02a
 

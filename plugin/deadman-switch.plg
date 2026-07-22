@@ -4,7 +4,7 @@
 <PLUGIN
   name="deadman-switch"
   author="Dereck"
-  version="2026.05.02a"
+  version="2026.07.22a"
   launch="Settings/deadman-switch"
   pluginURL="https://raw.githubusercontent.com/dereckhall/unraid-deadmans-switch/main/plugin/deadman-switch.plg"
   
@@ -15,6 +15,28 @@
 
 <CHANGES>
 <![CDATA[
+
+### 2026.07.22a
+
+Big batch of reliability and security fixes from a full code audit.
+
+**The scary ones:**
+- Removing a deletion path (or script) in the UI didn't actually remove it from the saved config — it would still get wiped on trigger
+- A path with an apostrophe or colon broke trigger.sh and it would execute *nothing* while logging "ALL ACTIONS EXECUTED"
+- arm/disarm/pause/config endpoints worked over GET, which skips Unraid's CSRF check — a bare link could disarm the switch. POST-only now
+- State writes weren't atomic or locked: a slow webhook retry could clobber a fresh check-in, and quick check-in tokens overwrote each other (custom webhook links were dead if Discord was also enabled)
+
+**Behavior changes:**
+- Pause actually freezes the countdown now (an expired long pause used to dump you straight into a trigger with zero warnings)
+- Warnings only mark themselves sent after delivery succeeds, so failed sends retry next cron cycle
+- The double-miss "first miss" alert no longer renders as a green all-clear, and the timer only resets once it's delivered
+- Uptime Kuma pushes work with a bare push URL (used to silently report "up" forever)
+- The External URL setting is now used for notification check-in links, so they work away from home
+
+**Smaller stuff:**
+- API key via X-Api-Key header, hash_equals comparison
+- 4 workers on the port 3801 server so one stalled connection can't block remote check-ins
+- Cron intervals over 59 minutes fixed, cleared number fields no longer zero the deadline, log rotation on /boot, 72h check-in tokens, reminder status color, shred caveat in the UI
 
 ### 2026.05.02a
 
@@ -34,10 +56,6 @@ Fix plugin icon size from 16x16 to 48x48
 
 Add custom plugin icon to installed plugins page
 
-### 2026.04.10b
-
-Fix version display showing v1.0 instead of actual plugin version
-
 
 For older releases, see https://github.com/dereckhall/unraid-deadmans-switch/releases
 ]]>
@@ -53,7 +71,7 @@ Clean old package versions
 <INLINE>
 <![CDATA[
 # Remove old package versions
-rm -f $(ls /boot/config/plugins/deadman-switch/deadman-switch-*.txz 2>/dev/null | grep -v '2026.05.02a')
+rm -f $(ls /boot/config/plugins/deadman-switch/deadman-switch-*.txz 2>/dev/null | grep -v '2026.07.22a')
 
 # Create plugin directory if needed
 mkdir -p /boot/config/plugins/deadman-switch
@@ -68,15 +86,15 @@ PACKAGE INSTALLATION
 Download and install the main package
 ===========================================
 -->
-<FILE Name="/boot/config/plugins/deadman-switch/deadman-switch-2026.05.02a-noarch-1.txz">
-<URL>https://github.com/dereckhall/unraid-deadmans-switch/releases/download/2026.05.02a/deadman-switch-2026.05.02a-noarch-1.txz</URL>
-<SHA256>42177db1e6202b75c7e794c496d6ea7c8a7d29f978c1cc77aceeee3c25e78900</SHA256>
+<FILE Name="/boot/config/plugins/deadman-switch/deadman-switch-2026.07.22a-noarch-1.txz">
+<URL>https://github.com/dereckhall/unraid-deadmans-switch/releases/download/2026.07.22a/deadman-switch-2026.07.22a-noarch-1.txz</URL>
+<SHA256>56f73d412f579e5151db4bba46eaccc5672c3acc7a9e3740d62a97cda250f128</SHA256>
 </FILE>
 
 <FILE Run="/bin/bash">
 <INLINE>
 <![CDATA[
-upgradepkg --install-new /boot/config/plugins/deadman-switch/deadman-switch-2026.05.02a-noarch-1.txz
+upgradepkg --install-new /boot/config/plugins/deadman-switch/deadman-switch-2026.07.22a-noarch-1.txz
 ]]>
 </INLINE>
 </FILE>
@@ -102,12 +120,12 @@ rm -f /etc/cron.d/deadman-switch
 /usr/local/sbin/update_cron
 
 # Run install script (initializes config/state if needed, pass version since PLG isn't written yet)
-/usr/local/emhttp/plugins/deadman-switch/scripts/install.sh "2026.05.02a"
+/usr/local/emhttp/plugins/deadman-switch/scripts/install.sh "2026.07.22a"
 
 echo ""
 echo "----------------------------------------------------"
 echo " deadman-switch has been installed."
-echo " Version: 2026.05.02a"
+echo " Version: 2026.07.22a"
 echo "----------------------------------------------------"
 echo ""
 ]]>

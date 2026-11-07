@@ -18,8 +18,24 @@ if [ ! -f "$CONFIG_FILE" ] || [ ! -f "$STATE_FILE" ]; then
     exit 1
 fi
 
-# Check if dry run
-DRY_RUN=$(php -r "\$c = json_decode(file_get_contents('$CONFIG_FILE'), true); echo \$c['dry_run'] ? '1' : '0';")
+# Once per boot. mkdir is atomic: overlapping cron runs cannot both pass.
+# RAM: survives a dead flash; removed by arm/disarm or reboot. Checked before
+# the banner so a refused run does not log a second TRIGGER ACTIVATED.
+RUN_DIR="/var/run/deadman-switch"; MARKER="$RUN_DIR/triggered"; mkdir -p "$RUN_DIR"
+if ! mkdir "$MARKER" 2>/dev/null; then
+    if [ -d "$MARKER" ]; then
+        log "Trigger already executed this boot (or a run is in progress); refusing to run actions again" "ERROR"
+        exit 0
+    fi
+    # The RAM dir itself is unusable: never let that block the trigger; fall
+    # back to the persisted triggered flag alone
+    log "Could not create trigger marker $MARKER; proceeding without the once-per-boot guard" "ERROR"
+fi
+
+# Check if dry run (same loader as the action runner below; last line only, in
+# case PHP prints a warning on stdout; anything but an explicit 0 = dry-run banner)
+DRY_RUN=$(php -r 'require_once "/usr/local/emhttp/plugins/deadman-switch/include/helpers.php"; echo "\n", dms_load_config()["dry_run"] ? 1 : 0;' 2>/dev/null | tail -n 1)
+[ "$DRY_RUN" = "0" ] || DRY_RUN=1
 
 if [ "$DRY_RUN" = "1" ]; then
     log "=== TRIGGER ACTIVATED (DRY RUN MODE) ===" "WARN"
@@ -28,16 +44,11 @@ else
 fi
 
 # Mark as triggered before running actions so a long action list can't cause
-# repeat triggers on later cron cycles
-php << 'PHPEOF'
-<?php
-require_once '/usr/local/emhttp/plugins/deadman-switch/include/helpers.php';
-dms_update_state(function($s) {
-    $s['triggered'] = true;
-    $s['trigger_time'] = date('c');
-    return $s;
-});
-PHPEOF
+# repeat triggers on later cron cycles. On a dead flash the RAM marker above
+# still holds: actions run once per boot, not never and not every cycle.
+if ! php -r 'require_once "/usr/local/emhttp/plugins/deadman-switch/include/helpers.php"; exit(dms_update_state(function($s){ $s["triggered"]=true; $s["trigger_time"]=date("c"); return $s; }) === false ? 1 : 0);'; then
+    log "Could not persist triggered=true to flash; actions will run ONCE this boot (RAM marker set)" "ERROR"
+fi
 
 # Execute all actions from PHP. The quoted heredoc means no shell interpolation:
 # paths with quotes, apostrophes, colons, or spaces reach PHP intact, and

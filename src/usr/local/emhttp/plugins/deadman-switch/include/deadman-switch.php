@@ -71,6 +71,12 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
             <strong style="color:#ff9800">State was restored from backup (state.json.bak) at <?= $dms_rec_ts !== null ? date('M j, Y g:i A', $dms_rec_ts) : htmlspecialchars((string)$state['recovered_at']) ?> and the switch was DISARMED as a precaution. Verify Last Check-in below, then re-arm the switch.</strong>
         </div>
         <?php endif; ?>
+        <?php if (!empty($state['last_notify_failure'])): ?>
+        <?php $dms_nf_ts = dms_parse_time($state['last_notify_failure']); ?>
+        <div class="dms-section" style="border-left: 4px solid #ff9800; background: rgba(255,152,0,0.12)">
+            <strong style="color:#ff9800">Last notification attempt failed at <?= $dms_nf_ts !== null ? date('M j, Y g:i A', $dms_nf_ts) : htmlspecialchars((string)$state['last_notify_failure']) ?>; check your webhook URLs on the Notifications tab.</strong>
+        </div>
+        <?php endif; ?>
         <div class="dms-status-card" style="border-color: <?= $status_color ?>">
             <div class="dms-status-badge" id="dms-status-badge" style="background: <?= $status_color ?>">
                 <?= $status_label ?>

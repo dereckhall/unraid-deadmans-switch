@@ -31,6 +31,17 @@ done
 API_PID=$(cat "$PID_FILE" 2>/dev/null)
 api_pid_is_ours "$API_PID" || "$SCRIPT_DIR/start-api.sh" 2>/dev/null
 
+# Per-boot RAM markers (alert once-ness, trigger.sh's 'triggered' marker)
+RUN_DIR="/var/run/deadman-switch"; mkdir -p "$RUN_DIR"
+alert_once() {   # <name> <message>: broadcast once per boot (RAM marker)
+    local marker="$RUN_DIR/alert.$1"; [ -e "$marker" ] && return 0
+    # With an unreadable config, zero enabled webhooks is not success: the
+    # alert is retried each cycle (syslog + Kuma down are the floor)
+    if php -r 'require_once "/usr/local/emhttp/plugins/deadman-switch/include/helpers.php";
+        $cfg = dms_load_config(); $r = dms_broadcast_plain($cfg, $argv[1]);
+        exit(($r["sent"] > 0 || ($r["enabled"] === 0 && dms_config_load_error() === null)) ? 0 : 1);' -- "$2" 2>/dev/null; then touch "$marker"; fi
+}
+
 if [ ! -f "$CONFIG_FILE" ] || [ ! -f "$STATE_FILE" ]; then
     exit 0
 fi
@@ -67,6 +78,10 @@ RESULT=$(php -r "
     // time() >= null both hold in PHP, i.e. a wrong TRIGGER)
     if (dms_state_load_error() !== null || dms_config_load_error() !== null) { echo 'STATUS:state_unreadable'; exit; }
     if (\$state['last_checkin'] !== null && dms_parse_time(\$state['last_checkin']) === null) { echo 'STATUS:state_invalid'; exit; }
+
+    // A .bak restore (which also disarms) is reported before the armed check;
+    // epoch first because the ISO last_checkin contains colons
+    if (!empty(\$state['recovered_at'])) echo 'RECOVERED:' . (dms_parse_time(\$state['recovered_at']) ?? time()) . ':' . (\$state['last_checkin'] ?? 'none') . \"\n\";
 
     // Check if armed
     if (!\$state['armed']) {
@@ -113,17 +128,10 @@ RESULT=$(php -r "
             \$msg = \"\xE2\x9A\xA0\xEF\xB8\x8F Dead Man's Switch: System clock anomaly detected. \" .
                     \"Clock (\$sys_time) is behind last check-in (\$checkin_time). \" .
                     \"Timer cannot function correctly until clock is corrected.\";
-            \$enabled = 0;
-            \$sent = 0;
-            foreach (\$config['webhooks'] as \$type => \$wh) {
-                if (!\$wh['enabled']) continue;
-                \$enabled++;
-                \$r = dms_send_webhook(\$type, \$wh, \$msg);
-                if (\$r['success']) \$sent++;
-            }
+            \$r = dms_broadcast_plain(\$config, \$msg);
             // Only mark as notified once a send succeeded (or none configured),
             // so a failed alert is retried next cycle
-            if (\$enabled === 0 || \$sent > 0) {
+            if (\$r['enabled'] === 0 || \$r['sent'] > 0) {
                 dms_update_state(function(\$s) {
                     \$s['last_notification_level'] = 'clock_anomaly';
                     return \$s;
@@ -161,20 +169,15 @@ RESULT=$(php -r "
             // render from the reset state below and read as an all-clear
             \$msg = \"\xE2\x9A\xA0\xEF\xB8\x8F Dead Man's Switch: Missed check-in #1 recorded (double-miss protection is on). \" .
                    \"The timer has been reset \xE2\x80\x94 missing the NEXT deadline will trigger your configured actions.\";
-            \$enabled = 0;
-            \$sent = 0;
-            foreach (\$config['webhooks'] as \$type => \$wh) {
-                if (!\$wh['enabled']) continue;
-                \$enabled++;
-                \$r = dms_send_webhook(\$type, \$wh, \$msg);
-                if (\$r['success']) \$sent++;
-            }
+            \$r = dms_broadcast_plain(\$config, \$msg);
             // Only reset the timer once the warning went out (or no channels
             // are configured): resetting on a failed send would let the next
             // miss trigger destructive actions with zero warning received.
-            // The double-miss guard above keeps this from ever triggering
-            // while the send keeps failing.
-            if (\$enabled === 0 || \$sent > 0) {
+            // Bounded by the grace period: a webhook that stays broken must
+            // not park the switch forever (Kuma down + the Settings banner
+            // cover the retry window). Only miss #2 can reach TRIGGER.
+            if (\$r['enabled'] === 0 || \$r['sent'] > 0 || time() >= \$grace_end) {
+                if (\$r['sent'] === 0 && \$r['enabled'] > 0) dms_log('First-miss warning undeliverable for the whole grace period; resetting timer anyway. CHECK YOUR WEBHOOKS.', 'ERROR');
                 dms_update_state(function(\$s) {
                     \$s['last_checkin'] = date('c');
                     \$s['grace_period_start'] = null;
@@ -184,7 +187,7 @@ RESULT=$(php -r "
                 dms_log('First miss recorded (double-miss enabled). Timer reset.', 'WARN');
                 echo 'STATUS:double_miss_first_miss';
             } else {
-                dms_log('First-miss warning failed on all channels; retrying next cycle before resetting timer', 'WARN');
+                dms_log('First-miss warning failed on all channels; retrying until the grace period ends before resetting timer', 'WARN');
                 echo 'STATUS:double_miss_notify_failed';
             }
             exit;
@@ -219,7 +222,7 @@ RESULT=$(php -r "
     }
 
     echo 'STATUS:ok';
-")
+" 2>&1); RC=$?
 
 # Send Uptime Kuma heartbeat (runs every cron cycle regardless of state)
 php -r "
@@ -229,19 +232,45 @@ php -r "
     dms_send_uptime_kuma_heartbeat(\$config, \$state);
 " 2>/dev/null
 
-# Parse result
+# Parse result. One event per line; PHP warnings/fatals also land on stdout
+SEEN=0; ERRS=0; HN=$(hostname)
 while IFS= read -r line; do
-    ACTION=$(echo "$line" | cut -d: -f1)
-    DETAIL=$(echo "$line" | cut -d: -f2-)
+    [ -z "$line" ] && continue
+    ACTION=${line%%:*}
+    DETAIL=${line#*:}
 
     case "$ACTION" in
         STATUS)
-            log "Cron check: $DETAIL"
+            SEEN=1
+            case "$DETAIL" in
+                state_unreadable)
+                    log "state.json/config.json unreadable — the switch is NOT being evaluated" ERROR
+                    alert_once state-unreadable "Dead Man's Switch on $HN: state.json or config.json on the flash drive is unreadable. The switch is not being evaluated until it is repaired (see Settings > Dead Man's Switch)."
+                    ;;
+                state_invalid)
+                    log "last_checkin is not a parseable timestamp — the switch is NOT being evaluated" ERROR
+                    alert_once state-invalid "Dead Man's Switch on $HN: state.json holds an unparseable last_checkin. Check in, or disarm and re-arm, to repair it."
+                    ;;
+                *)
+                    log "Cron check: $DETAIL"
+                    ;;
+            esac
+            ;;
+        RECOVERED)
+            SEEN=1
+            REC_EPOCH=${DETAIL%%:*}
+            REC_CHECKIN=${DETAIL#*:}
+            REC_AT=$(date -d @"$REC_EPOCH" '+%Y-%m-%d %H:%M:%S' 2>/dev/null) || REC_AT="$REC_EPOCH"
+            [ -n "$REC_AT" ] || REC_AT="$REC_EPOCH"
+            log "state.json was unreadable and was restored from state.json.bak at $REC_AT; the switch was DISARMED. last_checkin is now $REC_CHECKIN — verify Last Check-in and re-arm in Settings" ERROR
+            alert_once state-recovered "Dead Man's Switch on $HN: state.json was unreadable and was restored from state.json.bak at $REC_AT, and the switch was DISARMED. Last check-in is now $REC_CHECKIN. Verify Last Check-in in Settings > Dead Man's Switch and re-arm the switch."
             ;;
         UNPAUSE)
+            SEEN=1
             log "Pause expired, timer automatically resumed (deadline extended by pause duration)"
             ;;
         NOTIFY)
+            SEEN=1
             LEVEL=$(echo "$DETAIL" | cut -d: -f1)
             CHECKIN_REF=$(echo "$DETAIL" | cut -d: -f2)
             MSG=$(echo "$DETAIL" | cut -d: -f3-)
@@ -253,8 +282,25 @@ while IFS= read -r line; do
             fi
             ;;
         TRIGGER)
+            SEEN=1
             log "TRIGGER CONDITION MET: $DETAIL" "CRITICAL"
-            "$SCRIPT_DIR/trigger.sh"
+            if [ -d "$RUN_DIR/triggered" ]; then
+                log "Trigger already executed this boot but state could not be persisted; skipping repeat" ERROR
+            else
+                "$SCRIPT_DIR/trigger.sh"
+            fi
+            ;;
+        *)
+            ERRS=$((ERRS+1))
+            [ "$ERRS" -le 5 ] && log "Unrecognized evaluator output: $line" ERROR
             ;;
     esac
 done <<< "$RESULT"
+[ "$ERRS" -gt 5 ] && log "... $((ERRS-5)) more evaluator output line(s) suppressed" ERROR
+
+if [ "$RC" -ne 0 ] || [ "$SEEN" -eq 0 ]; then
+    log "Evaluator failed (exit $RC) — the switch is NOT being evaluated" ERROR
+    alert_once evaluator-failed "Dead Man's Switch: the cron evaluator is failing on $HN (exit $RC). The switch is not being evaluated until this is fixed. See Settings > Dead Man's Switch > Logs."
+else
+    rm -f "$RUN_DIR/alert.evaluator-failed"
+fi

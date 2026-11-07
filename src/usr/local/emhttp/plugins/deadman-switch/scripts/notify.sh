@@ -53,6 +53,8 @@ foreach ($config['webhooks'] as $type => $wh) {
     }
 }
 
+dms_record_notify_outcome($enabled, $succeeded);
+
 // Exit nonzero only when every enabled channel failed, so the caller knows
 // the notification never went out and can retry next cycle
 exit(($enabled === 0 || $succeeded > 0) ? 0 : 1);

@@ -823,6 +823,32 @@ function dms_test_webhook($config, $type) {
     return $result;
 }
 
+// Plain-text message to every enabled webhook (no retries); records the
+// outcome in state as last_notify_failure
+function dms_broadcast_plain($config, $msg) {
+    $enabled = 0;
+    $sent = 0;
+    foreach (($config['webhooks'] ?? []) as $type => $wh) {
+        if (empty($wh['enabled'])) continue;
+        $enabled++;
+        $r = dms_send_webhook($type, $wh, $msg);
+        if ($r['success']) $sent++;
+        else dms_log("Plain broadcast via $type failed: {$r['message']}", 'WARN');
+    }
+    dms_record_notify_outcome($enabled, $sent);
+    return ['enabled' => $enabled, 'sent' => $sent];
+}
+
+// last_notify_failure: set when every channel failed, cleared on any success;
+// skipped when state is unreadable
+function dms_record_notify_outcome($enabled, $sent) {
+    if ($enabled === 0 || dms_state_load_error() !== null) return;
+    dms_update_state(function($s) use ($sent) {
+        $s['last_notify_failure'] = $sent > 0 ? null : date('c');
+        return $s;
+    });
+}
+
 function dms_send_uptime_kuma_heartbeat($config, $state) {
     $uk = $config['uptime_kuma'];
     if (!$uk['enabled'] || empty($uk['push_url'])) return;
@@ -831,8 +857,13 @@ function dms_send_uptime_kuma_heartbeat($config, $state) {
     $days_left = $remaining !== null ? round($remaining / 86400, 1) : null;
     $warning_days = $uk['warning_days'] ?? 7;
 
-    // Determine up/down status for Uptime Kuma
-    if (!$state['armed']) {
+    // Determine up/down status for Uptime Kuma. An unreadable file means the
+    // switch is not being evaluated: report down. (A corrupt config.json with
+    // no .bak leaves push_url unknown, so syslog is the floor there.)
+    if (dms_state_load_error() !== null || dms_config_load_error() !== null) {
+        $uk_status = 'down';
+        $msg = 'state/config unreadable';
+    } elseif (!$state['armed']) {
         $uk_status = 'up';
         $msg = 'Disarmed';
     } elseif ($state['paused']) {
@@ -851,6 +882,7 @@ function dms_send_uptime_kuma_heartbeat($config, $state) {
         $uk_status = 'up';
         $msg = $days_left !== null ? "{$days_left} days remaining" : 'OK';
     }
+    if (!empty($state['last_notify_failure'])) $msg .= ' (notifications failing since ' . $state['last_notify_failure'] . ')';
 
     // Rebuild the query string so status/msg/ping are always set, even when
     // the pasted push URL has no query parameters at all (a bare URL would

@@ -28,13 +28,14 @@ Useful for privacy-conscious users who want automated cleanup if they become una
 - **Grace period** — extra hours after the deadline before actions trigger
 - **Trigger actions** — delete files/folders (with glob pattern support) or run custom bash scripts
 - **Dry run mode** — test your entire configuration safely before going live; run a dry test from the Actions tab to see exactly what would happen without actually deleting anything
-- **Arm / Disarm / Pause controls** — full lifecycle management
+- **Arm / Disarm / Pause controls** — full lifecycle management; the remaining time is frozen while paused, and pausing an already-paused switch extends the pause
 - **Double-miss protection** — optionally require two consecutive missed deadlines before triggering
+- **Corruption protection** — a backup (`.bak`) of the last good state and config is kept; a corrupt state file is restored from it and the switch is disarmed until you verify and re-arm
 - **Dashboard tile** — real-time countdown on the Unraid dashboard
 
 ### Notifications
 
-- **Discord webhooks** — rich embeds with severity-matched colors and one-click check-in links
+- **Discord webhooks** — rich embeds with severity-matched colors and quick check-in links
 - **Custom webhooks** — send notifications to any HTTP endpoint with configurable method and body template
 - **Uptime Kuma** — push heartbeat monitoring so you can track check-in health externally
 - **Warning thresholds** — configurable alerts at 50%, 75%, 90%, and 95% of elapsed time
@@ -42,8 +43,8 @@ Useful for privacy-conscious users who want automated cleanup if they become una
 ### External API
 
 - Runs on **port 3801**, separate from Unraid's authenticated nginx
-- API key protected endpoints for remote check-ins and status queries
-- Token-based quick check-in URLs (included in Discord notifications)
+- API key protected endpoints (`X-Api-Key` header) for remote check-ins and status queries
+- Token-based quick check-in URLs (included in Discord notifications) that open a confirmation page
 - CORS enabled for Home Assistant and browser clients
 
 ## Installation
@@ -75,18 +76,24 @@ The plugin runs a lightweight API server on **port 3801** for remote access with
 | Endpoint | Auth | Description |
 |----------|------|-------------|
 | `?action=health` | None | Health check, returns version |
-| `?action=status&key=KEY` | API key | Current switch status and countdown |
-| `?action=checkin&key=KEY` | API key | Perform a check-in |
-| `?action=get_state&key=KEY` | API key | Full state JSON |
-| `?action=quickcheckin&token=TOKEN` | Token | One-click check-in (for notification links) |
+| `?action=status` | API key (`X-Api-Key` header; `&key=` still accepted) | Current switch status and countdown |
+| `?action=checkin` | API key (`X-Api-Key` header; `&key=` still accepted) | Perform a check-in |
+| `?action=get_state` | API key (`X-Api-Key` header; `&key=` still accepted) | Full state JSON |
+| `?action=quickcheckin&token=TOKEN` | Token | Quick check-in link: opens a confirmation page whose button records the check-in |
 
 ```bash
 # Check status
-curl "http://YOUR_UNRAID_IP:3801/?action=status&key=YOUR_API_KEY"
+curl -H "X-Api-Key: YOUR_API_KEY" "http://YOUR_UNRAID_IP:3801/?action=status"
 
 # Perform a check-in
-curl "http://YOUR_UNRAID_IP:3801/?action=checkin&key=YOUR_API_KEY"
+curl -H "X-Api-Key: YOUR_API_KEY" "http://YOUR_UNRAID_IP:3801/?action=checkin"
 ```
+
+- Prefer the header: a key passed as `&key=` in the URL ends up in browser history and reverse-proxy access logs. The query-string form still works for existing setups.
+- API and web UI check-ins are refused while the switch is disarmed or has triggered — after a trigger, disarm and re-arm first.
+- Opening a quick check-in link only shows the confirmation page; the check-in happens when you press its button (a POST). A plain GET never records a check-in and other methods (e.g. HEAD) get `405`, so link previews and URL scanners can no longer check in for you or use up the link.
+- From a shell on the server: `/usr/local/emhttp/plugins/deadman-switch/scripts/checkin.sh [method]` (the optional method is recorded in the check-in history; default `cli`).
+- The authenticated Unraid-side endpoint `include/api.php?action=status` returns the same field names as the port-3801 `status` (only relevant if you call it directly).
 
 ## Home Assistant Integration
 
@@ -105,8 +112,10 @@ Add to `configuration.yaml`, then restart Home Assistant (or reload YAML configu
 ```yaml
 rest:
   - scan_interval: 60
-    resource: "http://YOUR_UNRAID_IP:3801/?action=status&key=YOUR_API_KEY"
+    resource: "http://YOUR_UNRAID_IP:3801/?action=status"
     method: GET
+    headers:
+      X-Api-Key: YOUR_API_KEY
     sensor:
       - name: "DMS Status"
         unique_id: "dms_status"
@@ -125,8 +134,10 @@ rest:
 
 rest_command:
   dms_checkin:
-    url: "http://YOUR_UNRAID_IP:3801/?action=checkin&key=YOUR_API_KEY"
+    url: "http://YOUR_UNRAID_IP:3801/?action=checkin"
     method: GET
+    headers:
+      X-Api-Key: YOUR_API_KEY
 ```
 
 </details>
@@ -201,8 +212,20 @@ Tap the button, confirm, and it hits the check-in endpoint and resets your timer
 2. A cron job runs periodically (default: every 60 minutes) to evaluate the countdown
 3. As the deadline approaches, notifications fire at configurable warning thresholds
 4. If you check in before the deadline, the timer resets
-5. If the deadline passes (plus grace period), configured trigger actions execute
-6. The API server self-heals — if the process dies, the cron job restarts it
+5. While paused, the remaining time is frozen — the deadline moves out by the length of the pause. The Dashboard tab shows **PAUSED**, **GRACE PERIOD** and **TRIGGERED** states correctly
+6. If the deadline passes (plus grace period), configured trigger actions execute — at most once per boot, even if the flash drive cannot record that the switch triggered
+7. With double-miss enabled, the first miss sends a warning and resets the timer. If the warning cannot be delivered, it is retried until the grace period ends; then the timer resets anyway and an ERROR is logged, so a broken webhook cannot stall the switch
+8. The API server self-heals — if the process dies, the cron job restarts it
+9. Failures are loud: a failing cron evaluator or an unreadable or restored state file sends a webhook alert (once per boot), Uptime Kuma reports **down** when the state file is unreadable and mentions persistent notification failures, and every failed action in the web UI shows an error toast
+
+### Files
+
+Settings and state live on the flash drive in `/boot/config/plugins/deadman-switch/`:
+
+- `config.json`, `state.json` — settings and switch state
+- `config.json.bak`, `state.json.bak` — copy of the last good version of each, refreshed when a meaningful setting or state value changes. If `state.json` is found corrupt it is restored from `state.json.bak` and the switch is **DISARMED** as a precaution (see Troubleshooting)
+
+Per-boot runtime files live in RAM in `/var/run/deadman-switch/`: the API server PID file (`api-server.pid`, moved off the flash drive), `alert.*` markers that limit failure alerts to once per boot, and the `triggered` marker that stops trigger actions running twice in one boot.
 
 ## Troubleshooting
 
@@ -211,10 +234,13 @@ Tap the button, confirm, and it hits the check-in endpoint and resets your timer
 The external API server on port 3801 should auto-start on install and self-heal via the cron job. If it's not running:
 
 ```bash
-# Check if the process is alive
+# Check if the process is alive (PID file is in RAM)
+cat /var/run/deadman-switch/api-server.pid
 ps aux | grep "external-api.php" | grep -v grep
 
-# Manually start it
+# Manually restart it (the server runs in its own process group, so stop
+# removes every worker and frees the port)
+/usr/local/emhttp/plugins/deadman-switch/scripts/stop-api.sh
 /usr/local/emhttp/plugins/deadman-switch/scripts/start-api.sh
 
 # Check for port conflicts
@@ -236,9 +262,17 @@ cat /boot/config/plugins/deadman-switch/deadman-switch.cron
 ### Discord notifications not sending
 
 1. Verify your webhook URL is correct in the Notifications tab
-2. Use the **Test** button in the UI to send a test notification
-3. Check the Logs tab for any error messages
+2. Use the **Test** button in the UI to send a test notification (it saves your settings first and only sends once the save succeeded)
+3. Check the Logs tab for any error messages; a notification that failed on every channel also shows a banner on the Dashboard tab
 4. Ensure your Unraid server has outbound internet access
+
+### Switch disarmed after a restore, or "state.json is unreadable"
+
+If `state.json` on the flash drive is found corrupt, it is restored from `state.json.bak` and the switch is **DISARMED** as a precaution — the backup may be older than your last check-in. A banner on the Settings page and a webhook alert (once per boot) tell you when this happens. Check the **Last Check-in** time on the Dashboard tab, then re-arm the switch.
+
+If there is no usable `.bak`, the switch refuses to write anything (so the evidence is not overwritten), stops evaluating the countdown, and shows a red banner on the Settings page. Repair or delete the corrupt file in `/boot/config/plugins/deadman-switch/` and reload the page.
+
+A corrupt `config.json` with a usable `config.json.bak` is restored from it and logged as an ERROR (the switch stays as it was) — review the Settings and Actions tabs. With no usable `.bak` it gets the same red banner as above.
 
 ### Actions not triggering (or triggering unexpectedly)
 
@@ -249,7 +283,9 @@ cat /boot/config/plugins/deadman-switch/deadman-switch.cron
 
 ### Quick check-in link not working
 
-The one-click check-in URL in Discord notifications uses port 3801 and requires direct network access to your Unraid server. It won't work through reverse proxies that don't forward port 3801. Ensure the link IP/hostname is reachable from where you're clicking it.
+Opening the link shows a confirmation page; the check-in is only recorded when you press its button. The link is single-use, and it shows an "inactive" page (without being used up) while the switch is disarmed or triggered.
+
+By default the link points at your server's LAN address on port 3801, so it only works on your network. To use it away from home, set **External API URL** on the Settings tab to a public URL (reverse proxy or port forward) that routes to **port 3801, not the Unraid web UI**. A URL that reaches the normal Unraid web interface will not work.
 
 ### Plugin not updating
 

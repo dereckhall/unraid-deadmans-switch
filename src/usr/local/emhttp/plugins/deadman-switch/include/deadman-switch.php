@@ -366,9 +366,9 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
             ?>
             <p class="dms-help" style="margin-top:10px">External API on port <strong>3801</strong> (no Unraid login required, API key authenticates):</p>
             <p class="dms-help">Check in remotely:</p>
-            <pre class="dms-code-block dms-copyable" onclick="dmsCopyText(this)" title="Click to copy">curl "<?= htmlspecialchars($api_base) ?>/?action=checkin&key=<?= $ekey ?>"</pre>
+            <pre class="dms-code-block dms-copyable" onclick="dmsCopyText(this)" title="Click to copy">curl -H "X-Api-Key: <?= $ekey ?>" "<?= htmlspecialchars($api_base) ?>/?action=checkin"</pre>
             <p class="dms-help">Get status (for Home Assistant, scripts, monitoring):</p>
-            <pre class="dms-code-block dms-copyable" onclick="dmsCopyText(this)" title="Click to copy">curl "<?= htmlspecialchars($api_base) ?>/?action=status&key=<?= $ekey ?>"</pre>
+            <pre class="dms-code-block dms-copyable" onclick="dmsCopyText(this)" title="Click to copy">curl -H "X-Api-Key: <?= $ekey ?>" "<?= htmlspecialchars($api_base) ?>/?action=status"</pre>
             <?php else: ?>
             <p class="dms-help" style="margin-top:10px">
                 Generate an API key to enable remote check-ins via <code>curl</code> or any HTTP client.

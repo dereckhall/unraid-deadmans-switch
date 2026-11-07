@@ -70,16 +70,9 @@ POST-INSTALL SCRIPT
 # Set script permissions
 chmod +x /usr/local/emhttp/plugins/{{ name }}/scripts/*.sh 2>/dev/null
 
-# Create cron file in plugin config dir (Unraid's update_cron reads *.cron from here)
-echo "0 * * * * /usr/local/emhttp/plugins/{{ name }}/scripts/check.sh >> /boot/config/plugins/{{ name }}/logs/cron.log 2>&1" > /boot/config/plugins/{{ name }}/{{ name }}.cron
-
-# Remove legacy cron file if present (old versions wrote directly to /etc/cron.d/)
-rm -f /etc/cron.d/{{ name }}
-
-# Regenerate system crontab
-/usr/local/sbin/update_cron
-
-# Run install script (initializes config/state if needed, pass version since PLG isn't written yet)
+# Run install script (initializes config/state, writes the check schedule from
+# the saved interval, runs the reinstall check; version passed since the PLG
+# isn't written yet)
 /usr/local/emhttp/plugins/{{ name }}/scripts/install.sh "{{ env['PLUGIN_VERSION'] }}"
 
 echo ""
@@ -103,6 +96,13 @@ REMOVE SCRIPT
 # Stop external API server
 /usr/local/emhttp/plugins/{{ name }}/scripts/stop-api.sh 2>/dev/null
 
+# Record whether the switch is still armed while helpers.php is still on disk
+ARMED=$(php -r 'require_once "/usr/local/emhttp/plugins/{{ name }}/include/helpers.php"; $s = dms_load_state(); echo dms_state_load_error() !== null ? "unknown" : ($s["armed"] ? "yes" : "no");' 2>/dev/null) || ARMED=unknown
+
+# Marker: an explicit uninstall happened. The next install.sh consumes it and
+# disarms the switch if its deadline passed while the plugin was gone.
+date -u +%FT%TZ > /boot/config/plugins/{{ name }}/.removed
+
 # Remove cron file and regenerate system crontab
 rm -f /boot/config/plugins/{{ name }}/{{ name }}.cron
 rm -f /etc/cron.d/{{ name }}
@@ -119,6 +119,13 @@ echo "----------------------------------------------------"
 echo " {{ name }} has been removed."
 echo " Config preserved at /boot/config/plugins/{{ name }}/"
 echo " Delete that directory manually for a clean removal."
+if [ "$ARMED" = "yes" ]; then
+    echo " NOTE: the switch is still ARMED in the preserved state. On reinstall it resumes,"
+    echo "       unless its deadline has already passed - then it is DISARMED and you must re-arm."
+elif [ "$ARMED" != "no" ]; then
+    echo " NOTE: the armed state could not be read. On reinstall an armed switch whose"
+    echo "       deadline has already passed is DISARMED and you must re-arm."
+fi
 echo "----------------------------------------------------"
 echo ""
 ]]>

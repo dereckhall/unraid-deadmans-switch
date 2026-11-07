@@ -12,10 +12,7 @@ dev-install:
 	cp -R $(PLUGIN_DIR)/* /usr/local/emhttp/plugins/$(PLUGIN_NAME)/
 	chmod +x /usr/local/emhttp/plugins/$(PLUGIN_NAME)/scripts/*.sh
 
-	# Install cron
-	echo "0 * * * * root /usr/local/emhttp/plugins/$(PLUGIN_NAME)/scripts/check.sh >/dev/null 2>&1" > /etc/cron.d/$(PLUGIN_NAME)
-
-	# Run install script
+	# Run install script (also writes the cron schedule)
 	/usr/local/emhttp/plugins/$(PLUGIN_NAME)/scripts/install.sh
 
 	@echo "Dev install complete. Refresh Unraid web UI."

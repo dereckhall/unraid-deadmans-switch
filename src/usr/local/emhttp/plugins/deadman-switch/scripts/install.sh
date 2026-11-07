@@ -26,33 +26,51 @@ if [ ! -f "$CONFIG_DIR/state.json" ]; then
     "
 fi
 
-# Update cron interval from config if user has customized it
-# Unraid uses update_cron which reads *.cron files from each plugin's config dir
-CRON_FILE="$CONFIG_DIR/deadman-switch.cron"
-if [ -f "$CONFIG_DIR/config.json" ]; then
-    # Sanitized loader (clamped to 5..1440); last line only in case PHP prints
-    # a warning on stdout; anything but digits falls back to 60
-    CRON_MINUTES=$(php -r 'require_once $argv[1] . "/include/helpers.php"; echo "\n", dms_load_config()["cron_interval_minutes"];' -- "$PLUGIN_DIR" 2>/dev/null | tail -n 1)
-    [[ $CRON_MINUTES =~ ^[0-9]+$ ]] || CRON_MINUTES=60
-
-    # */N in the minutes field is wrong past 59 — schedule on the hour instead
-    if [ "$CRON_MINUTES" -ge 60 ] 2>/dev/null; then
-        CRON_HOURS=$(( (CRON_MINUTES + 30) / 60 ))
-        [ "$CRON_HOURS" -lt 1 ] && CRON_HOURS=1
-        if [ "$CRON_HOURS" = "1" ]; then
-            echo "0 * * * * $PLUGIN_DIR/scripts/check.sh >> $CONFIG_DIR/logs/cron.log 2>&1" > "$CRON_FILE"
-        else
-            echo "0 */$CRON_HOURS * * * $PLUGIN_DIR/scripts/check.sh >> $CONFIG_DIR/logs/cron.log 2>&1" > "$CRON_FILE"
-        fi
-    else
-        echo "*/$CRON_MINUTES * * * * $PLUGIN_DIR/scripts/check.sh >> $CONFIG_DIR/logs/cron.log 2>&1" > "$CRON_FILE"
-    fi
-
-    # Remove legacy cron file if present
-    rm -f /etc/cron.d/deadman-switch
-
-    /usr/local/sbin/update_cron
+# Reinstall sanity check. The PLG remove script leaves this marker behind; it is
+# never present on a plain boot (which also runs this script and must never
+# disarm a switch that is meant to fire after downtime). After an explicit
+# uninstall/reinstall whose deadline passed while the plugin was gone, disarm
+# instead of triggering on the first cron run. Runs before the cron schedule is
+# installed so check.sh cannot fire in between.
+REMOVED_MARKER="$CONFIG_DIR/.removed"
+if [ -f "$REMOVED_MARKER" ]; then
+    php -r 'require_once "/usr/local/emhttp/plugins/deadman-switch/include/helpers.php";
+        $c = dms_load_config(); $s = dms_load_state();
+        if (dms_state_load_error() !== null || !$s["armed"] || $s["triggered"]) exit(0);
+        $g = dms_get_grace_end($c, $s);
+        if ($g !== null && time() >= $g) {
+            $did = false;
+            $ok = dms_update_state(function($s) use (&$did) {
+                // Re-checked under the state lock
+                if (!$s["armed"] || $s["triggered"]) return $s;
+                $did = true;
+                $s["armed"] = false; $s["paused"] = false; $s["pause_start"] = null; $s["pause_expires"] = null;
+                $s["grace_period_start"] = null; $s["missed_count"] = 0; $s["last_notification_level"] = null;
+                return $s;
+            });
+            if ($ok === false) {
+                dms_log("Reinstalled after removal with the deadline already passed, but the switch could NOT be disarmed (state write failed). It may trigger on the next cron run.", "ERROR");
+                echo "WARNING: Dead Man'"'"'s Switch deadline passed while uninstalled and the switch could not be disarmed. Check the flash drive and disarm it in Settings.\n";
+                exit(1);
+            }
+            if (!$did) exit(0);
+            dms_log("Reinstalled after removal with the deadline already passed: switch DISARMED to prevent an immediate trigger. Review Settings and re-arm.", "ERROR");
+            echo "NOTICE: Dead Man'"'"'s Switch was DISARMED on reinstall (deadline passed while uninstalled). Re-arm it in Settings.\n";
+            exit(0);
+        }
+        dms_log("Reinstalled after removal; switch is still ARMED (deadline not yet passed)", "WARN");'
+    rm -f "$REMOVED_MARKER"
 fi
+
+# Write the cron schedule from the (sanitized, 5..1440) config. One code path:
+# dms_update_cron() builds the line, and leaves the file and the log alone when
+# it is already current. Unraid's update_cron reads *.cron from the config dir.
+php -r 'require_once "/usr/local/emhttp/plugins/deadman-switch/include/helpers.php"; dms_update_cron(dms_load_config()["cron_interval_minutes"]);'
+
+# Remove legacy cron file if present (old versions wrote directly to /etc/cron.d/)
+rm -f /etc/cron.d/deadman-switch
+
+/usr/local/sbin/update_cron
 
 # Start external API server (port 3801, bypasses nginx auth)
 "$PLUGIN_DIR/scripts/start-api.sh"

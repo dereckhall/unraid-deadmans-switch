@@ -1080,7 +1080,14 @@ function dms_update_cron($minutes = 60) {
         $schedule = "*/$minutes * * * *";
     }
 
-    file_put_contents($cron_file, "$schedule $script >> $log 2>&1\n", LOCK_EX);
+    $line = "$schedule $script >> $log 2>&1\n";
+    // Already current (every boot re-runs install.sh): no rewrite, no log line
+    if (@file_get_contents($cron_file) === $line) return;
+
+    if (file_put_contents($cron_file, $line, LOCK_EX) === false) {
+        dms_log("Failed to write cron schedule to $cron_file (flash full or read-only?)", 'ERROR');
+        return;
+    }
     exec('/usr/local/sbin/update_cron');
     dms_log("Cron schedule updated to every $minutes minutes");
 }

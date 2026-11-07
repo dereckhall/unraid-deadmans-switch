@@ -27,10 +27,9 @@ for f in "$LOG_FILE" "$CONFIG_DIR/logs/cron.log" "$CONFIG_DIR/logs/api-server.lo
 done
 
 # Ensure external API server is running (self-healing)
-PID_FILE="$CONFIG_DIR/api-server.pid"
-if [ ! -f "$PID_FILE" ] || ! kill -0 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null; then
-    "$SCRIPT_DIR/start-api.sh" 2>/dev/null
-fi
+. "$SCRIPT_DIR/api-common.sh"
+API_PID=$(cat "$PID_FILE" 2>/dev/null)
+api_pid_is_ours "$API_PID" || "$SCRIPT_DIR/start-api.sh" 2>/dev/null
 
 if [ ! -f "$CONFIG_FILE" ] || [ ! -f "$STATE_FILE" ]; then
     exit 0

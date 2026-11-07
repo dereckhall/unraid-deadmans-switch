@@ -11,6 +11,7 @@ define('DMS_STATE_FILE', DMS_CONFIG_DIR . '/state.json');
 define('DMS_LOG_DIR', DMS_CONFIG_DIR . '/logs');
 define('DMS_LOG_FILE', DMS_LOG_DIR . '/deadman.log');
 define('DMS_PLUGIN_DIR', '/usr/local/emhttp/plugins/deadman-switch');
+define('DMS_RUN_DIR', '/var/run/deadman-switch');
 define('DMS_VERSION', (function() {
     $plg = '/boot/config/plugins/deadman-switch.plg';
     if (file_exists($plg) && preg_match('/PLUGIN[^>]+version="([^"]+)"/', @file_get_contents($plg, false, null, 0, 512), $m)) {
@@ -31,7 +32,7 @@ function dms_get_api_base($config = null) {
 }
 
 function dms_ensure_dirs() {
-    $dirs = [DMS_CONFIG_DIR, DMS_LOG_DIR];
+    $dirs = [DMS_CONFIG_DIR, DMS_LOG_DIR, DMS_RUN_DIR];
     foreach ($dirs as $dir) {
         if (!is_dir($dir)) {
             mkdir($dir, 0700, true);

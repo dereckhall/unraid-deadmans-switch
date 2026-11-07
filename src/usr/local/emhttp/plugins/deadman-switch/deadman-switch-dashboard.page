@@ -75,6 +75,9 @@ $detail_line = '';
 if ($last_checkin_ago) {
     $detail_line .= "Checked in {$last_checkin_ago}";
 }
+if (!empty($state['recovered_at'])) {
+    $detail_line .= ($detail_line !== '' ? ' · ' : '') . 'restored from backup - re-arm';
+}
 
 // Check-in button
 $checkin_btn = '';

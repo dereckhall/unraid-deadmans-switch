@@ -167,12 +167,31 @@ function dms_load_config() {
     $config = array_replace_recursive($defaults, $data);
 
     if ($status === 'recovered') {
-        // Written directly (not via dms_update_config, which would recurse);
-        // [] = leave the good .bak alone
+        // The .bak lags one save behind, so its actions list may predate the
+        // last save: DISARM exactly like a state restore. The disarm is
+        // persisted BEFORE config.json is rewritten, so until it has reached
+        // disk config.json stays unreadable and every load retries it.
+        $disarmed = dms_update_state('dms_disarm_after_restore');
+        if ($disarmed === false) {
+            // State unreadable or flash not writable: the restored actions
+            // must not run while the switch may still be armed on disk. Park
+            // (the evaluator reports state_unreadable: ERROR, syslog, alert)
+            // and leave config.json and its .bak untouched.
+            $msg = "config.json is unreadable ($bytes bytes) and config.json.bak is usable, but the switch could not be " .
+                   "DISARMED (state.json unreadable or flash write failed), so the restore was not applied. " .
+                   "The switch is NOT evaluated until the flash drive is writable.";
+            $GLOBALS['dms_load_error']['config'] = $msg;
+            dms_log($msg, 'ERROR');
+            return dms_sanitize_config($config);
+        }
+        // Forensic copy of the corrupt bytes, then rewrite. Written directly
+        // (not via dms_update_config, which would recurse); [] = leave the
+        // good .bak alone
+        @copy(DMS_CONFIG_FILE, DMS_CONFIG_FILE . '.corrupt');
         $ok = dms_write_json_atomic(DMS_CONFIG_FILE, $config, []);
-        dms_log("config.json unreadable ($bytes bytes); restored from config.json.bak" .
-                ($ok ? '' : ' (in memory only: rewriting config.json FAILED)') .
-                ". Verify Settings and Actions.", 'ERROR');
+        dms_log("config.json unreadable ($bytes bytes); restored from config.json.bak and the switch was DISARMED as a precaution" .
+                " — the restored actions list may predate your last save. Review Actions and re-arm." .
+                ($ok ? '' : ' (In memory only: rewriting config.json FAILED.)'), 'ERROR');
     }
 
     // Read-side repair only; the sanitized form reaches disk at the next save
@@ -247,7 +266,7 @@ function dms_update_state($fn) {
     // .bak only on a semantic change: token mints, notification levels and
     // failure markers must not churn the backup of the last good state
     $ok = dms_write_json_atomic(DMS_STATE_FILE, $state,
-        ['armed', 'triggered', 'trigger_time', 'paused', 'pause_start', 'last_checkin', 'grace_period_start', 'missed_count']);
+        ['armed', 'triggered', 'trigger_time', 'paused', 'pause_start', 'pause_expires', 'last_checkin', 'grace_period_start', 'missed_count']);
     if ($lock) {
         flock($lock, LOCK_UN);
         fclose($lock);
@@ -328,19 +347,12 @@ function dms_load_state() {
         // The .bak lags one semantic change behind (usually the previous
         // check-in), so its deadline may be stale or already past. Restore it
         // but DISARM as a precaution: a restore must never run actions. The
-        // user verifies Last Check-in and re-arms. recovered_at drives the
-        // Settings banner and is cleared by a check-in, arm or disarm.
-        // triggered/trigger_time, last_checkin, history and tokens stay as restored.
-        $state['armed'] = false;
-        $state['paused'] = false;
-        $state['pause_start'] = null;
-        $state['pause_expires'] = null;
-        $state['grace_period_start'] = null;
-        $state['missed_count'] = 0;
-        $state['last_notification_level'] = null;
-        $state['recovered_at'] = date('c');
-        // Written directly: dms_update_state() would recurse into this loader.
+        // user verifies Last Check-in and re-arms.
+        $state = dms_disarm_after_restore($state);
+        // Forensic copy of the corrupt bytes, then rewrite. Written directly:
+        // dms_update_state() would recurse into this loader.
         // [] = leave the good .bak alone
+        @copy(DMS_STATE_FILE, DMS_STATE_FILE . '.corrupt');
         $ok = dms_write_json_atomic(DMS_STATE_FILE, $state, []);
         dms_log("state.json unreadable ($bytes bytes); restored from state.json.bak and DISARMED as a precaution" .
                 " — re-arm in Settings after verifying it." .
@@ -349,6 +361,22 @@ function dms_load_state() {
     }
 
     return $state;
+}
+
+// Shared by the state.json and config.json .bak restores. recovered_at drives
+// the Settings banner, the evaluator's RECOVERED alert and Kuma "down"; it is
+// cleared by a check-in, arm or disarm. triggered/trigger_time, last_checkin,
+// history and tokens are left as they are.
+function dms_disarm_after_restore(array $s) {
+    $s['armed'] = false;
+    $s['paused'] = false;
+    $s['pause_start'] = null;
+    $s['pause_expires'] = null;
+    $s['grace_period_start'] = null;
+    $s['missed_count'] = 0;
+    $s['last_notification_level'] = null;
+    $s['recovered_at'] = date('c');
+    return $s;
 }
 
 function dms_save_state($state) {
@@ -593,7 +621,7 @@ function dms_use_quick_checkin_token($token) {
     return $r !== false && $ok;
 }
 
-// Task 5's trigger.sh creates this marker with mkdir; arm/disarm remove it
+// trigger.sh creates this marker with mkdir; arm/disarm remove it
 // after their state write succeeded
 function dms_clear_trigger_marker() {
     $m = DMS_RUN_DIR . '/triggered';
@@ -839,12 +867,18 @@ function dms_broadcast_plain($config, $msg) {
     return ['enabled' => $enabled, 'sent' => $sent];
 }
 
-// last_notify_failure: set when every channel failed, cleared on any success;
-// skipped when state is unreadable
+// last_notify_failure: the time of the FIRST failure in the current run of
+// failures (every channel failed), cleared on any success. Written only on a
+// transition, so a webhook outage costs no flash write per cron cycle.
+// Skipped when state.json is unreadable (the locked writer would refuse anyway)
 function dms_record_notify_outcome($enabled, $sent) {
-    if ($enabled === 0 || dms_state_load_error() !== null) return;
+    if ($enabled === 0) return;
+    $cur = dms_load_state();
+    if (dms_state_load_error() !== null) return;
+    if (($sent > 0) === ($cur['last_notify_failure'] === null)) return;   // no transition
     dms_update_state(function($s) use ($sent) {
-        $s['last_notify_failure'] = $sent > 0 ? null : date('c');
+        if ($sent > 0) $s['last_notify_failure'] = null;
+        elseif ($s['last_notify_failure'] === null) $s['last_notify_failure'] = date('c');
         return $s;
     });
 }
@@ -863,6 +897,10 @@ function dms_send_uptime_kuma_heartbeat($config, $state) {
     if (dms_state_load_error() !== null || dms_config_load_error() !== null) {
         $uk_status = 'down';
         $msg = 'state/config unreadable';
+    } elseif (!empty($state['recovered_at'])) {
+        // A .bak restore disarmed the switch: not being evaluated until re-armed
+        $uk_status = 'down';
+        $msg = 'Restored from backup and DISARMED - re-arm required';
     } elseif (!$state['armed']) {
         $uk_status = 'up';
         $msg = 'Disarmed';

@@ -11,6 +11,11 @@ SCRIPT_DIR="$(dirname "$0")"
 log() {
     local level="${2:-INFO}"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $1" >> "$LOG_FILE"
+    # Mirror serious problems to syslog, like dms_log() does in PHP
+    if [ "$level" = "ERROR" ] || [ "$level" = "CRITICAL" ]; then
+        command -v logger >/dev/null 2>&1 && logger -t deadman-switch "[$level] $1" 2>/dev/null
+    fi
+    return 0
 }
 
 if [ ! -f "$CONFIG_FILE" ] || [ ! -f "$STATE_FILE" ]; then

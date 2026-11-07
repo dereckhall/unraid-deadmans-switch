@@ -68,13 +68,13 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
         <?php if (!empty($state['recovered_at'])): ?>
         <?php $dms_rec_ts = dms_parse_time($state['recovered_at']); ?>
         <div class="dms-section" style="border-left: 4px solid #ff9800; background: rgba(255,152,0,0.12)">
-            <strong style="color:#ff9800">State was restored from backup (state.json.bak) at <?= $dms_rec_ts !== null ? date('M j, Y g:i A', $dms_rec_ts) : htmlspecialchars((string)$state['recovered_at']) ?> and the switch was DISARMED as a precaution. Verify Last Check-in below, then re-arm the switch.</strong>
+            <strong style="color:#ff9800">State or settings were restored from a backup at <?= $dms_rec_ts !== null ? date('M j, Y g:i A', $dms_rec_ts) : htmlspecialchars((string)$state['recovered_at']) ?> and the switch was DISARMED as a precaution. Verify Last Check-in and the Actions tab, then re-arm.</strong>
         </div>
         <?php endif; ?>
         <?php if (!empty($state['last_notify_failure'])): ?>
         <?php $dms_nf_ts = dms_parse_time($state['last_notify_failure']); ?>
         <div class="dms-section" style="border-left: 4px solid #ff9800; background: rgba(255,152,0,0.12)">
-            <strong style="color:#ff9800">Last notification attempt failed at <?= $dms_nf_ts !== null ? date('M j, Y g:i A', $dms_nf_ts) : htmlspecialchars((string)$state['last_notify_failure']) ?>; check your webhook URLs on the Notifications tab.</strong>
+            <strong style="color:#ff9800">Notifications have been failing since <?= $dms_nf_ts !== null ? date('M j, Y g:i A', $dms_nf_ts) : htmlspecialchars((string)$state['last_notify_failure']) ?>; check your webhook URLs on the Notifications tab.</strong>
         </div>
         <?php endif; ?>
         <div class="dms-status-card" style="border-color: <?= $status_color ?>">
@@ -95,7 +95,7 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
             <?php elseif ($status === 'paused'): ?>
             <div class="dms-countdown dms-paused">
                 <div class="dms-countdown-value">PAUSED</div>
-                <div class="dms-countdown-label">Paused until <?= ($dms_t = dms_parse_time($state['pause_expires'] ?? null)) !== null ? date('M j, Y g:i A', $dms_t) : 'manually resumed' ?><?= $remaining !== null ? ' · ' . dms_format_time_remaining($remaining) . ' remaining when resumed' : '' ?></div>
+                <div class="dms-countdown-label">Paused until <?= ($dms_t = dms_parse_time($state['pause_expires'] ?? null)) !== null ? date('M j, Y g:i A', $dms_t) : 'manually resumed' ?><?= ($remaining !== null && $remaining > 0) ? ' · ' . dms_format_time_remaining($remaining) . ' remaining when resumed' : '' ?></div>
             </div>
             <?php elseif ($state['armed'] && $remaining !== null && $remaining > 0): ?>
             <div class="dms-countdown" id="dms-countdown">
@@ -247,7 +247,7 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
         <!-- Uptime Kuma -->
         <div class="dms-section">
             <h3>Uptime Kuma</h3>
-            <p class="dms-help">Push heartbeat to Uptime Kuma on every cron cycle. Reports "down" during the grace period or when triggered; earlier warnings arrive as an "up" heartbeat with a warning message.</p>
+            <p class="dms-help">Push heartbeat to Uptime Kuma on every cron cycle. Reports "down" during the grace period, when triggered, when the state or config file is unreadable, and after a restore from backup; earlier warnings arrive as an "up" heartbeat with a warning message.</p>
             <div class="dms-webhook-config">
                 <label class="dms-toggle">
                     <input type="checkbox" id="cfg-uk-enabled" <?= $config['uptime_kuma']['enabled'] ? 'checked' : '' ?>>

@@ -30,7 +30,7 @@ Useful for privacy-conscious users who want automated cleanup if they become una
 - **Dry run mode** — test your entire configuration safely before going live; run a dry test from the Actions tab to see exactly what would happen without actually deleting anything
 - **Arm / Disarm / Pause controls** — full lifecycle management; the remaining time is frozen while paused, and pausing an already-paused switch extends the pause
 - **Double-miss protection** — optionally require two consecutive missed deadlines before triggering
-- **Corruption protection** — a backup (`.bak`) of the last good state and config is kept; a corrupt state file is restored from it and the switch is disarmed until you verify and re-arm
+- **Corruption protection** — a backup (`.bak`) of the last good state and config is kept; a corrupt state or config file is restored from it (the corrupt bytes are kept in a `.corrupt` file) and the switch is disarmed until you verify and re-arm
 - **Dashboard tile** — real-time countdown on the Unraid dashboard
 
 ### Notifications
@@ -90,9 +90,9 @@ curl -H "X-Api-Key: YOUR_API_KEY" "http://YOUR_UNRAID_IP:3801/?action=checkin"
 ```
 
 - Prefer the header: a key passed as `&key=` in the URL ends up in browser history and reverse-proxy access logs. The query-string form still works for existing setups.
-- API and web UI check-ins are refused while the switch is disarmed or has triggered — after a trigger, disarm and re-arm first.
-- Opening a quick check-in link only shows the confirmation page; the check-in happens when you press its button (a POST). A plain GET never records a check-in and other methods (e.g. HEAD) get `405`, so link previews and URL scanners can no longer check in for you or use up the link.
-- From a shell on the server: `/usr/local/emhttp/plugins/deadman-switch/scripts/checkin.sh [method]` (the optional method is recorded in the check-in history; default `cli`).
+- API, web UI, quick-link and `checkin.sh` check-ins are refused while the switch is disarmed or has triggered — after a trigger, disarm and re-arm first.
+- Opening a quick check-in link only shows the confirmation page; the check-in happens when you press its button (a POST). A plain GET never records a check-in and other methods (e.g. HEAD) get `405`, so link previews and URL scanners can no longer record a check-in (or use up the link).
+- From a shell on the server: `/usr/local/emhttp/plugins/deadman-switch/scripts/checkin.sh [method]` (the optional method is recorded in the check-in history; default `cli`). It prints the reason and exits nonzero when the switch is disarmed or has triggered.
 - The authenticated Unraid-side endpoint `include/api.php?action=status` returns the same field names as the port-3801 `status` (only relevant if you call it directly).
 
 ## Home Assistant Integration
@@ -212,18 +212,23 @@ Tap the button, confirm, and it hits the check-in endpoint and resets your timer
 2. A cron job runs periodically (default: every 60 minutes) to evaluate the countdown
 3. As the deadline approaches, notifications fire at configurable warning thresholds
 4. If you check in before the deadline, the timer resets
-5. While paused, the remaining time is frozen — the deadline moves out by the length of the pause. The Dashboard tab shows **PAUSED**, **GRACE PERIOD** and **TRIGGERED** states correctly
-6. If the deadline passes (plus grace period), configured trigger actions execute — at most once per boot, even if the flash drive cannot record that the switch triggered
-7. With double-miss enabled, the first miss sends a warning and resets the timer. If the warning cannot be delivered, it is retried until the grace period ends; then the timer resets anyway and an ERROR is logged, so a broken webhook cannot stall the switch
+5. You can pause the switch: while paused the remaining time is frozen, and the deadline timestamp moves out by the length of the pause
+6. If the deadline passes (plus grace period), configured trigger actions execute — at most once per boot until you re-arm, even if the flash drive cannot record that the switch triggered
+7. With double-miss enabled, the first miss sends a warning and resets the timer. If the warning cannot be delivered, it is retried until the grace period ends; then the timer resets anyway and an ERROR is logged, so a broken webhook cannot stall the switch. If the flash drive cannot be written, the first miss cannot be recorded: the switch stays parked and will **not** trigger until the flash drive is writable, and it says so (ERROR in the log and syslog, a webhook alert once per boot)
 8. The API server self-heals — if the process dies, the cron job restarts it
-9. Failures are loud: a failing cron evaluator or an unreadable or restored state file sends a webhook alert (once per boot), Uptime Kuma reports **down** when the state file is unreadable and mentions persistent notification failures, and every failed action in the web UI shows an error toast
+9. Failures are loud:
+   - a failing cron evaluator, an unreadable state or config file, or a restore from backup alerts once per boot by webhook when PHP still runs, and always logs to syslog
+   - a missing `config.json` or `state.json` (e.g. an unmounted flash drive) is logged to syslog on every cron check
+   - Uptime Kuma reports **down** when the state or config file is unreadable and after a restore from backup, and its message says since when notifications have been failing
+   - every failed action in the web UI shows an error toast
 
 ### Files
 
 Settings and state live on the flash drive in `/boot/config/plugins/deadman-switch/`:
 
-- `config.json`, `state.json` — settings and switch state
-- `config.json.bak`, `state.json.bak` — copy of the last good version of each, refreshed when a meaningful setting or state value changes. If `state.json` is found corrupt it is restored from `state.json.bak` and the switch is **DISARMED** as a precaution (see Troubleshooting)
+- `config.json`, `state.json` — settings and switch state (deleting `config.json` resets all settings to defaults)
+- `config.json.bak`, `state.json.bak` — copy of the last good version of each, refreshed when a meaningful setting or state value changes. If `state.json` or `config.json` is found corrupt it is restored from its `.bak` and the switch is **DISARMED** as a precaution (see Troubleshooting)
+- `config.json.corrupt`, `state.json.corrupt` — the corrupt bytes, kept when a file was restored from its `.bak`
 
 Per-boot runtime files live in RAM in `/var/run/deadman-switch/`: the API server PID file (`api-server.pid`, moved off the flash drive), `alert.*` markers that limit failure alerts to once per boot, and the `triggered` marker that stops trigger actions running twice in one boot.
 
@@ -270,9 +275,11 @@ cat /boot/config/plugins/deadman-switch/deadman-switch.cron
 
 If `state.json` on the flash drive is found corrupt, it is restored from `state.json.bak` and the switch is **DISARMED** as a precaution — the backup may be older than your last check-in. A banner on the Settings page and a webhook alert (once per boot) tell you when this happens. Check the **Last Check-in** time on the Dashboard tab, then re-arm the switch.
 
-If there is no usable `.bak`, the switch refuses to write anything (so the evidence is not overwritten), stops evaluating the countdown, and shows a red banner on the Settings page. Repair or delete the corrupt file in `/boot/config/plugins/deadman-switch/` and reload the page.
+A corrupt `config.json` with a usable `config.json.bak` is handled the same way: the settings are restored and the switch is **DISARMED**. The restored actions list may predate your last save, so review the Settings and Actions tabs, then re-arm. (If the switch cannot be disarmed because the flash drive cannot be written, the restore is not applied and the switch is not evaluated until the flash drive is writable.)
 
-A corrupt `config.json` with a usable `config.json.bak` is restored from it and logged as an ERROR (the switch stays as it was) — review the Settings and Actions tabs. With no usable `.bak` it gets the same red banner as above.
+In both cases the corrupt original is kept next to it as `state.json.corrupt` or `config.json.corrupt`.
+
+If there is no usable `.bak`, the switch refuses to write anything (so the evidence is not overwritten with defaults), stops evaluating the countdown, and shows a red banner on the Settings page. Repair or delete the corrupt file in `/boot/config/plugins/deadman-switch/` and reload the page (deleting `config.json` resets all settings to defaults).
 
 ### Actions not triggering (or triggering unexpectedly)
 

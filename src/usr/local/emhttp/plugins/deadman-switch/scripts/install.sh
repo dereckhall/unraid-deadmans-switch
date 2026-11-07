@@ -30,11 +30,10 @@ fi
 # Unraid uses update_cron which reads *.cron files from each plugin's config dir
 CRON_FILE="$CONFIG_DIR/deadman-switch.cron"
 if [ -f "$CONFIG_DIR/config.json" ]; then
-    CRON_MINUTES=$(php -r "
-        \$config = json_decode(file_get_contents('$CONFIG_DIR/config.json'), true);
-        echo \$config['cron_interval_minutes'] ?? 60;
-    " 2>/dev/null)
-    [ -z "$CRON_MINUTES" ] && CRON_MINUTES=60
+    # Sanitized loader (clamped to 5..1440); last line only in case PHP prints
+    # a warning on stdout; anything but digits falls back to 60
+    CRON_MINUTES=$(php -r 'require_once $argv[1] . "/include/helpers.php"; echo "\n", dms_load_config()["cron_interval_minutes"];' -- "$PLUGIN_DIR" 2>/dev/null | tail -n 1)
+    [[ $CRON_MINUTES =~ ^[0-9]+$ ]] || CRON_MINUTES=60
 
     # */N in the minutes field is wrong past 59 — schedule on the hour instead
     if [ "$CRON_MINUTES" -ge 60 ] 2>/dev/null; then

@@ -157,7 +157,9 @@ switch ($action) {
             if (!empty($s['paused'])) {
                 $exp = dms_parse_time($s['pause_expires'] ?? null);
                 if ($exp === null || $exp >= $now) {
-                    // Live pause: extend only, the frozen deadline stays put
+                    // Live pause: extend only, the frozen deadline stays put. A
+                    // missing pause_start would accrue no credit: start it now
+                    if (dms_parse_time($s['pause_start'] ?? null) === null) $s['pause_start'] = date('c', $now);
                     $s['pause_expires'] = date('c', $now + $hours * 3600);
                     return $s;
                 }
@@ -234,10 +236,12 @@ switch ($action) {
         // A changed interval shifts the warning thresholds; clear the recorded
         // notification level so a now-lower level isn't suppressed forever
         if (($config['checkin_interval_days'] ?? $old_interval) != $old_interval) {
-            dms_update_state(function($s) {
+            $r = dms_update_state(function($s) {
                 $s['last_notification_level'] = null;
                 return $s;
             });
+            // The config save itself succeeded; a stale level only delays warnings
+            if ($r === false) dms_log('Interval changed but the recorded notification level could not be cleared; warnings below the last level stay suppressed until the next check-in', 'WARN');
         }
 
         // Update cron schedule if interval changed

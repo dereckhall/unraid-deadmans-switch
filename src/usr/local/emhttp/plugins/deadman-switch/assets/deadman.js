@@ -37,11 +37,18 @@ function dmsToast(message, type) {
 }
 
 // Shared failure handler for every API call: HTTP errors, network errors,
-// expired sessions (Unraid's CSRF check) and failed flash writes (HTTP 500)
-function dmsFail(xhr) {
+// expired sessions (Unraid's CSRF check) and failed flash writes (HTTP 500).
+// Unraid's csrf_terminate() exits with an EMPTY HTTP 200 body, which jQuery
+// reports as a 'parsererror' on the expected JSON: that is a session expiry too
+function dmsFail(xhr, textStatus) {
+    var body = xhr.responseText || '';
     var msg = 'Request failed (HTTP ' + xhr.status + ')';
-    try { var j = JSON.parse(xhr.responseText); msg = j.error || j.message || msg; }
-    catch (e) { if (xhr.status === 0) msg = 'Network error'; else if (/csrf/i.test(xhr.responseText || '')) msg = 'Session expired - reload the page'; }
+    try { var j = JSON.parse(body); msg = j.error || j.message || msg; }
+    catch (e) {
+        if (xhr.status === 0) msg = 'Network error';
+        else if (xhr.status === 200 && (!/\S/.test(body) || textStatus === 'parsererror')) msg = 'Session expired - reload the page';
+        else if (/csrf/i.test(body)) msg = 'Session expired - reload the page';
+    }
     dmsToast(msg, 'error');
 }
 
@@ -371,7 +378,7 @@ function dmsClearLogs() {
     });
 }
 
-// Countdown colour for the elapsed percentage, following the configured
+// Countdown color for the elapsed percentage, following the configured
 // warning thresholds (same comparisons as dms_get_warning_level())
 function dmsCountdownColor(pct, t) {
     t = t || {};

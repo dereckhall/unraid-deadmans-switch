@@ -11,6 +11,11 @@ SCRIPT_DIR="$(dirname "$0")"
 log() {
     local level="${2:-INFO}"
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $1" >> "$LOG_FILE"
+    # Mirror serious problems to syslog, like dms_log() does in PHP
+    if [ "$level" = "ERROR" ] || [ "$level" = "CRITICAL" ]; then
+        command -v logger >/dev/null 2>&1 && logger -t deadman-switch "[$level] $1" 2>/dev/null
+    fi
+    return 0
 }
 
 # Ensure log directory exists
@@ -31,8 +36,9 @@ done
 API_PID=$(cat "$PID_FILE" 2>/dev/null)
 api_pid_is_ours "$API_PID" || "$SCRIPT_DIR/start-api.sh" 2>/dev/null
 
-# Per-boot RAM markers (alert once-ness, trigger.sh's 'triggered' marker)
-RUN_DIR="/var/run/deadman-switch"; mkdir -p "$RUN_DIR"
+# Per-boot RAM markers (alert once-ness, trigger.sh's 'triggered' marker);
+# RUN_DIR comes from api-common.sh
+mkdir -p "$RUN_DIR"
 alert_once() {   # <name> <message>: broadcast once per boot (RAM marker)
     local marker="$RUN_DIR/alert.$1"; [ -e "$marker" ] && return 0
     # With an unreadable config, zero enabled webhooks is not success: the
@@ -42,7 +48,12 @@ alert_once() {   # <name> <message>: broadcast once per boot (RAM marker)
         exit(($r["sent"] > 0 || ($r["enabled"] === 0 && dms_config_load_error() === null)) ? 0 : 1);' -- "$2" 2>/dev/null; then touch "$marker"; fi
 }
 
+# Not silent: syslog always, the flash log if it is writable. No webhook alert
+# here: loading a missing state.json would recreate it as a fresh, disarmed one
 if [ ! -f "$CONFIG_FILE" ] || [ ! -f "$STATE_FILE" ]; then
+    MISSING_MSG="config.json or state.json missing under $CONFIG_DIR - the switch is NOT being evaluated (flash drive unmounted?)"
+    command -v logger >/dev/null 2>&1 && logger -t deadman-switch "ERROR: $MISSING_MSG" 2>/dev/null
+    { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] $MISSING_MSG" >> "$LOG_FILE"; } 2>/dev/null
     exit 0
 fi
 
@@ -146,6 +157,9 @@ RESULT=$(php -r "
     \$warning_level = dms_get_warning_level(\$config, \$state);
     \$last_level = \$state['last_notification_level'];
 
+    // Belt and braces: a null remaining would pass <= 0 below (wrong TRIGGER)
+    if (\$remaining === null) { echo 'STATUS:state_invalid'; exit; }
+
     // Timer expired
     if (\$remaining <= 0) {
         \$grace_end = dms_get_grace_end(\$config, \$state);
@@ -160,11 +174,27 @@ RESULT=$(php -r "
                 }
                 return \$s;
             });
-            if (is_array(\$updated)) \$state = \$updated;
+            if (is_array(\$updated)) {
+                \$state = \$updated;
+            } else {
+                // Flash not writable: count this miss in memory so a recorded
+                // first miss (missed_count 1 on disk) still reaches the
+                // trigger path on the second miss
+                \$state['missed_count'] = intval(\$state['missed_count'] ?? 0) + 1;
+            }
         }
 
         // Check double-miss requirement
         if (\$config['double_miss'] && \$state['missed_count'] < 2) {
+            // The reset below must reach the flash drive, or the switch would
+            // announce a reset it never made and later miss #2 could not be
+            // counted. Probe with a no-op locked write BEFORE broadcasting so
+            // a dead flash parks the switch without a misleading webhook
+            if (dms_update_state(function(\$s) { return \$s; }) === false) {
+                dms_log('First-miss reset could NOT be persisted (flash write failed); double-miss cannot be honored until the flash drive is writable. The switch is parked and will NOT trigger.', 'ERROR');
+                echo 'STATUS:double_miss_reset_failed';
+                exit;
+            }
             // Send a plain message directly: the templated notification would
             // render from the reset state below and read as an all-clear
             \$msg = \"\xE2\x9A\xA0\xEF\xB8\x8F Dead Man's Switch: Missed check-in #1 recorded (double-miss protection is on). \" .
@@ -178,12 +208,18 @@ RESULT=$(php -r "
             // cover the retry window). Only miss #2 can reach TRIGGER.
             if (\$r['enabled'] === 0 || \$r['sent'] > 0 || time() >= \$grace_end) {
                 if (\$r['sent'] === 0 && \$r['enabled'] > 0) dms_log('First-miss warning undeliverable for the whole grace period; resetting timer anyway. CHECK YOUR WEBHOOKS.', 'ERROR');
-                dms_update_state(function(\$s) {
+                \$reset = dms_update_state(function(\$s) {
                     \$s['last_checkin'] = date('c');
                     \$s['grace_period_start'] = null;
                     \$s['last_notification_level'] = null;
                     return \$s;
                 });
+                if (\$reset === false) {
+                    // The flash failed between the probe and this write
+                    dms_log('First-miss reset could NOT be persisted (flash write failed); double-miss cannot be honored until the flash drive is writable. The switch is parked and will NOT trigger.', 'ERROR');
+                    echo 'STATUS:double_miss_reset_failed';
+                    exit;
+                }
                 dms_log('First miss recorded (double-miss enabled). Timer reset.', 'WARN');
                 echo 'STATUS:double_miss_first_miss';
             } else {
@@ -251,6 +287,10 @@ while IFS= read -r line; do
                     log "last_checkin is not a parseable timestamp — the switch is NOT being evaluated" ERROR
                     alert_once state-invalid "Dead Man's Switch on $HN: state.json holds an unparseable last_checkin. Check in, or disarm and re-arm, to repair it."
                     ;;
+                double_miss_reset_failed)
+                    log "Double-miss first-miss reset could not be written to the flash drive — the switch is parked and will NOT trigger" ERROR
+                    alert_once double-miss-reset-failed "Dead Man's Switch on $HN: the flash drive cannot be written, so the first missed check-in could not be recorded. Double-miss protection cannot be honored and the switch will NOT trigger until the flash drive is writable. Check the server."
+                    ;;
                 *)
                     log "Cron check: $DETAIL"
                     ;;
@@ -262,8 +302,8 @@ while IFS= read -r line; do
             REC_CHECKIN=${DETAIL#*:}
             REC_AT=$(date -d @"$REC_EPOCH" '+%Y-%m-%d %H:%M:%S' 2>/dev/null) || REC_AT="$REC_EPOCH"
             [ -n "$REC_AT" ] || REC_AT="$REC_EPOCH"
-            log "state.json was unreadable and was restored from state.json.bak at $REC_AT; the switch was DISARMED. last_checkin is now $REC_CHECKIN — verify Last Check-in and re-arm in Settings" ERROR
-            alert_once state-recovered "Dead Man's Switch on $HN: state.json was unreadable and was restored from state.json.bak at $REC_AT, and the switch was DISARMED. Last check-in is now $REC_CHECKIN. Verify Last Check-in in Settings > Dead Man's Switch and re-arm the switch."
+            log "State or settings were restored from a backup at $REC_AT and the switch was DISARMED as a precaution. last_checkin is now $REC_CHECKIN — verify Last Check-in and the Actions tab, then re-arm in Settings" ERROR
+            alert_once state-recovered "Dead Man's Switch on $HN: state or settings were restored from a backup at $REC_AT and the switch was DISARMED as a precaution. Last check-in is now $REC_CHECKIN. Verify Last Check-in and the Actions tab in Settings > Dead Man's Switch, then re-arm the switch."
             ;;
         UNPAUSE)
             SEEN=1
@@ -285,7 +325,7 @@ while IFS= read -r line; do
             SEEN=1
             log "TRIGGER CONDITION MET: $DETAIL" "CRITICAL"
             if [ -d "$RUN_DIR/triggered" ]; then
-                log "Trigger already executed this boot but state could not be persisted; skipping repeat" ERROR
+                log "Trigger already executed or in progress this boot but state could not be persisted; skipping repeat" ERROR
             else
                 "$SCRIPT_DIR/trigger.sh"
             fi

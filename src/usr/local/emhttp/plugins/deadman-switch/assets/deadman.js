@@ -368,7 +368,7 @@ $(function() {
     });
 
     // Live countdown timer
-    if (!dmsState.armed || !dmsState.remaining || dmsState.paused) return;
+    if (!dmsState.armed || dmsState.paused || dmsState.remaining === null || dmsState.remaining <= 0) return;
 
     var countdownEl = $('#dms-countdown-value');
     if (!countdownEl.length) return;
@@ -376,6 +376,7 @@ $(function() {
     // Use wall-clock time to avoid drift from setInterval inaccuracy
     var startTime = Date.now();
     var startRemaining = dmsState.remaining;
+    var dmsExpiredReload = false;
 
     function updateCountdown() {
         var elapsed = Math.floor((Date.now() - startTime) / 1000);
@@ -383,6 +384,11 @@ $(function() {
 
         if (remaining <= 0) {
             countdownEl.text('EXPIRED').css('color', '#f44336');
+            // Reload once so the server renders the grace/triggered state
+            if (!dmsExpiredReload) {
+                dmsExpiredReload = true;
+                setTimeout(function() { location.reload(); }, 2000);
+            }
             return;
         }
 

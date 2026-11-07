@@ -370,12 +370,40 @@ function dms_log($message, $level = 'INFO') {
     }
 }
 
+// Pause seconds not yet credited to last_checkin. Counted from max(pause_start, last_checkin): a
+// check-in during a pause already restarted the clock. Capped at pause_expires.
+function dms_pause_credit_seconds($state, $now = null) {
+    if (empty($state['paused'])) return 0;
+    $now = $now ?? time();
+    $start = dms_parse_time($state['pause_start'] ?? null);
+    if ($start === null) return 0;
+    $base = dms_parse_time($state['last_checkin'] ?? null);
+    $from = $base !== null ? max($start, $base) : $start;
+    $end = $now;
+    $exp = dms_parse_time($state['pause_expires'] ?? null);
+    if ($exp !== null) $end = min($end, $exp);
+    return max(0, $end - $from);
+}
+
 // null when there is no check-in or it can't be parsed. Callers must treat
-// null as "unknown", never as "expired".
+// null as "unknown", never as "expired". Frozen while paused: the uncredited
+// pause time is added, so the deadline does not move until the pause ends.
 function dms_get_deadline($config, $state) {
-    $last = dms_parse_time($state['last_checkin'] ?? null);
-    if ($last === null) return null;
-    return $last + $config['checkin_interval_days'] * 86400;
+    $base = dms_parse_time($state['last_checkin'] ?? null);
+    return $base === null ? null : $base + intval($config['checkin_interval_days']) * 86400 + dms_pause_credit_seconds($state);
+}
+
+// Use inside a dms_update_state() closure. Moves the pause credit into
+// last_checkin and clears the pause.
+// Invariant: dms_get_deadline(before) === dms_get_deadline(after).
+function dms_apply_unpause(array $s) {
+    $credit = dms_pause_credit_seconds($s);
+    $base = dms_parse_time($s['last_checkin'] ?? null);
+    if ($credit > 0 && $base !== null) $s['last_checkin'] = date('c', min(time(), $base + $credit));   // clamp = belt and braces
+    $s['paused'] = false;
+    $s['pause_start'] = null;
+    $s['pause_expires'] = null;
+    return $s;
 }
 
 function dms_get_grace_end($config, $state) {

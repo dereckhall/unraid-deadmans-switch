@@ -83,21 +83,12 @@ RESULT=$(php -r "
     // Check if paused
     if (\$state['paused']) {
         // Check if pause has expired
-        if (\$state['pause_expires'] && strtotime(\$state['pause_expires']) < time()) {
+        \$pause_exp = dms_parse_time(\$state['pause_expires'] ?? null);
+        if (\$pause_exp !== null && \$pause_exp < time()) {
             \$updated = dms_update_state(function(\$s) {
                 // The countdown is frozen while paused: credit the pause
                 // duration (up to its scheduled expiry) to last_checkin
-                if (\$s['pause_start'] && \$s['last_checkin']) {
-                    \$end = \$s['pause_expires'] ? min(time(), strtotime(\$s['pause_expires'])) : time();
-                    \$paused_secs = \$end - strtotime(\$s['pause_start']);
-                    if (\$paused_secs > 0) {
-                        \$s['last_checkin'] = date('c', min(time(), strtotime(\$s['last_checkin']) + \$paused_secs));
-                    }
-                }
-                \$s['paused'] = false;
-                \$s['pause_start'] = null;
-                \$s['pause_expires'] = null;
-                return \$s;
+                return dms_apply_unpause(\$s);
             });
             if (is_array(\$updated)) \$state = \$updated;
             echo 'UNPAUSE:auto' . \"\n\";

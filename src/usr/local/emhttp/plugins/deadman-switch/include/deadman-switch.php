@@ -11,7 +11,6 @@ if (!isset($var)) {
 $config = dms_load_config();
 $state = dms_load_state();
 $status = dms_get_status($config, $state);
-$warning_level = dms_get_warning_level($config, $state);
 $remaining = dms_time_remaining($config, $state);
 $deadline = dms_get_deadline($config, $state);
 $grace_end = dms_get_grace_end($config, $state);
@@ -77,20 +76,25 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
                 <?= $status_label ?>
             </div>
 
-            <?php if ($state['armed'] && $remaining !== null): ?>
-            <div class="dms-countdown" id="dms-countdown">
-                <div class="dms-countdown-value" id="dms-countdown-value"><?= dms_format_time_remaining($remaining) ?></div>
-                <div class="dms-countdown-label">remaining until deadline</div>
+            <?php if ($status === 'triggered'): ?>
+            <div class="dms-countdown dms-triggered">
+                <div class="dms-countdown-value">TRIGGERED</div>
+                <div class="dms-countdown-label"><?= ($dms_t = dms_parse_time($state['trigger_time'] ?? null)) !== null ? 'Actions ran at ' . date('M j, Y g:i A', $dms_t) : 'Grace period ended — actions run on the next cron check' ?></div>
             </div>
             <?php elseif ($status === 'grace_period'): ?>
             <div class="dms-countdown dms-grace">
-                <div class="dms-countdown-value" id="dms-countdown-value">GRACE PERIOD</div>
-                <div class="dms-countdown-label">Actions will execute when grace period ends</div>
+                <div class="dms-countdown-value">GRACE PERIOD</div>
+                <div class="dms-countdown-label">Actions will execute at <?= $grace_end ? date('M j, Y g:i A', $grace_end) : 'the next check' ?></div>
             </div>
             <?php elseif ($status === 'paused'): ?>
             <div class="dms-countdown dms-paused">
                 <div class="dms-countdown-value">PAUSED</div>
-                <div class="dms-countdown-label">Paused until <?= $state['pause_expires'] ? date('M j, Y g:i A', strtotime($state['pause_expires'])) : 'manually resumed' ?></div>
+                <div class="dms-countdown-label">Paused until <?= ($dms_t = dms_parse_time($state['pause_expires'] ?? null)) !== null ? date('M j, Y g:i A', $dms_t) : 'manually resumed' ?><?= $remaining !== null ? ' · ' . dms_format_time_remaining($remaining) . ' remaining when resumed' : '' ?></div>
+            </div>
+            <?php elseif ($state['armed'] && $remaining !== null && $remaining > 0): ?>
+            <div class="dms-countdown" id="dms-countdown">
+                <div class="dms-countdown-value" id="dms-countdown-value"><?= dms_format_time_remaining($remaining) ?></div>
+                <div class="dms-countdown-label">remaining until deadline</div>
             </div>
             <?php endif; ?>
 
@@ -388,9 +392,6 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
     // Pass PHP state to JS
     var dmsState = {
         armed: <?= json_encode($state['armed']) ?>,
-        status: <?= json_encode($status) ?>,
-        deadline: <?= $deadline ? json_encode($deadline) : 'null' ?>,
-        graceEnd: <?= $grace_end ? json_encode($grace_end) : 'null' ?>,
         remaining: <?= $remaining !== null ? json_encode($remaining) : 'null' ?>,
         paused: <?= json_encode($state['paused']) ?>,
         csrfToken: <?= json_encode($var['csrf_token'] ?? '') ?>

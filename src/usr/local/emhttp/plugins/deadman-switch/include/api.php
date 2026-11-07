@@ -178,10 +178,25 @@ switch ($action) {
         $max = $config['pause_max_hours'];
         if ($hours > $max) $hours = $max;
         if ($hours < 1) $hours = 1;
+        if (!$state['armed'] || $state['triggered']) {
+            echo json_encode(['success' => false, 'message' => $state['triggered'] ? 'Switch has triggered' : 'Switch is not armed']);
+            break;
+        }
         $state = dms_update_state(function($s) use ($hours) {
+            $now = time();
+            if (!empty($s['paused'])) {
+                $exp = dms_parse_time($s['pause_expires'] ?? null);
+                if ($exp === null || $exp >= $now) {
+                    // Live pause: extend only, the frozen deadline stays put
+                    $s['pause_expires'] = date('c', $now + $hours * 3600);
+                    return $s;
+                }
+                // Expired but cron has not run yet: credit up to the old expiry, start fresh
+                $s = dms_apply_unpause($s);
+            }
             $s['paused'] = true;
-            $s['pause_start'] = date('c');
-            $s['pause_expires'] = date('c', time() + ($hours * 3600));
+            $s['pause_start'] = date('c', $now);
+            $s['pause_expires'] = date('c', $now + $hours * 3600);
             return $s;
         });
         if (!is_array($state)) {
@@ -194,20 +209,20 @@ switch ($action) {
         break;
 
     case 'unpause':
-        dms_update_state(function($s) {
-            // The countdown is frozen while paused: credit the pause duration
-            // to last_checkin so the deadline moves out by the time spent paused
-            if ($s['paused'] && $s['pause_start'] && $s['last_checkin']) {
-                $paused_secs = time() - strtotime($s['pause_start']);
-                if ($paused_secs > 0) {
-                    $s['last_checkin'] = date('c', min(time(), strtotime($s['last_checkin']) + $paused_secs));
-                }
-            }
-            $s['paused'] = false;
-            $s['pause_start'] = null;
-            $s['pause_expires'] = null;
-            return $s;
+        if (!$state['paused']) {
+            echo json_encode(['success' => false, 'message' => 'Not paused']);
+            break;
+        }
+        // The countdown is frozen while paused: dms_apply_unpause() moves the
+        // pause credit into last_checkin so the deadline does not change
+        $r = dms_update_state(function($s) {
+            return $s['paused'] ? dms_apply_unpause($s) : $s;
         });
+        if ($r === false) {
+            http_response_code(500);
+            echo json_encode(['success' => false, 'error' => 'Failed to write state file']);
+            break;
+        }
         dms_log("Timer UNPAUSED (deadline extended by pause duration)");
         echo json_encode(['success' => true]);
         break;

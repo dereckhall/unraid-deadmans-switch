@@ -87,6 +87,14 @@
     animation: dms-blink 1s infinite;
 }
 
+.dms-paused .dms-countdown-value {
+    color: #2196f3;
+}
+
+.dms-triggered .dms-countdown-value {
+    color: #b71c1c;
+}
+
 @keyframes dms-blink {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }

@@ -44,13 +44,21 @@ if ($state['armed'] && $remaining !== null && !$state['paused']) {
 
 $last_checkin_ago = '';
 if ($state['last_checkin']) {
-    $ago_seconds = time() - strtotime($state['last_checkin']);
-    $ago_days = floor($ago_seconds / 86400);
-    $ago_hours = floor(($ago_seconds % 86400) / 3600);
-    if ($ago_days > 0) {
-        $last_checkin_ago = "{$ago_days}d {$ago_hours}h ago";
+    $t = dms_parse_time($state['last_checkin']);
+    if ($t === null) {
+        $last_checkin_ago = 'unknown';
+    } elseif (time() - $t < 0) {
+        // Check-in is in the future: system clock is behind (see check.sh clock sanity check)
+        $last_checkin_ago = 'clock anomaly';
     } else {
-        $last_checkin_ago = "{$ago_hours}h ago";
+        $ago_seconds = time() - $t;
+        $ago_days = floor($ago_seconds / 86400);
+        $ago_hours = floor(($ago_seconds % 86400) / 3600);
+        if ($ago_days > 0) {
+            $last_checkin_ago = "{$ago_days}d {$ago_hours}h ago";
+        } else {
+            $last_checkin_ago = "{$ago_hours}h ago";
+        }
     }
 }
 

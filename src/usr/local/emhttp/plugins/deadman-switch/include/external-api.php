@@ -18,7 +18,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 header('Content-Type: application/json');
 
 $action = $_GET['action'] ?? '';
-// Prefer the X-Api-Key header: keys in query strings end up in server logs
+// Prefer the X-Api-Key header: a key in the query string lands in browser history and reverse-proxy access logs
 $key = $_SERVER['HTTP_X_API_KEY'] ?? ($_GET['key'] ?? '');
 $token = $_GET['token'] ?? '';
 

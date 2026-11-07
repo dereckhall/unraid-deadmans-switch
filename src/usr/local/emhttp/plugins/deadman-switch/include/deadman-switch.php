@@ -57,6 +57,21 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
 
     <!-- DASHBOARD TAB -->
     <div id="dms-tab-dashboard" class="dms-tab-content active">
+        <?php $dms_load_errors = array_filter([dms_state_load_error(), dms_config_load_error()]); ?>
+        <?php if ($dms_load_errors): ?>
+        <div class="dms-section" style="border-left: 4px solid #f44336; background: rgba(244,67,54,0.12)">
+            <strong style="color:#f44336">state.json/config.json on the flash drive is unreadable; the switch cannot operate and will not save until it is repaired (a <code>.bak</code> copy may exist next to it).</strong>
+            <?php foreach ($dms_load_errors as $err): ?>
+            <div style="margin-top:6px"><?= htmlspecialchars($err) ?></div>
+            <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
+        <?php if (!empty($state['recovered_at'])): ?>
+        <?php $dms_rec_ts = dms_parse_time($state['recovered_at']); ?>
+        <div class="dms-section" style="border-left: 4px solid #ff9800; background: rgba(255,152,0,0.12)">
+            <strong style="color:#ff9800">State was restored from backup (state.json.bak) at <?= $dms_rec_ts !== null ? date('M j, Y g:i A', $dms_rec_ts) : htmlspecialchars((string)$state['recovered_at']) ?> and the switch was DISARMED as a precaution. Verify Last Check-in below, then re-arm the switch.</strong>
+        </div>
+        <?php endif; ?>
         <div class="dms-status-card" style="border-color: <?= $status_color ?>">
             <div class="dms-status-badge" id="dms-status-badge" style="background: <?= $status_color ?>">
                 <?= $status_label ?>
@@ -89,7 +104,8 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
                 <div class="dms-info-item">
                     <span class="dms-info-label">Last Check-in:</span>
                     <span class="dms-info-value" id="dms-last-checkin">
-                        <?= $state['last_checkin'] ? date('M j, Y g:i A', strtotime($state['last_checkin'])) : 'Never' ?>
+                        <?php $dms_lc = dms_parse_time($state['last_checkin']); ?>
+                        <?= !$state['last_checkin'] ? 'Never' : ($dms_lc === null ? 'invalid' : date('M j, Y g:i A', $dms_lc)) ?>
                     </span>
                 </div>
                 <div class="dms-info-item">
@@ -141,8 +157,9 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
                     <?php else: ?>
                         <?php foreach ($state['checkin_history'] as $entry): ?>
                         <tr>
-                            <td><?= date('M j, Y g:i A', strtotime($entry['time'])) ?></td>
-                            <td><?= htmlspecialchars($entry['method']) ?></td>
+                            <?php $dms_ht = dms_parse_time($entry['time'] ?? null); ?>
+                            <td><?= $dms_ht === null ? 'invalid' : date('M j, Y g:i A', $dms_ht) ?></td>
+                            <td><?= htmlspecialchars((string)($entry['method'] ?? '')) ?></td>
                         </tr>
                         <?php endforeach; ?>
                     <?php endif; ?>

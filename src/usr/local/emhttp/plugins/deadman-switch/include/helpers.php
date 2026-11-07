@@ -2,10 +2,11 @@
 // Dead Man's Switch - Shared PHP Functions
 
 // Use system timezone so logs/embeds match Unraid's configured time
-$_tz_parts = explode('zoneinfo/', @trim(shell_exec("readlink /etc/localtime 2>/dev/null")), 2);
+$_tz_parts = explode('zoneinfo/', (string)@readlink('/etc/localtime'), 2);
 if (isset($_tz_parts[1])) @date_default_timezone_set($_tz_parts[1]);
 
-define('DMS_CONFIG_DIR', '/boot/config/plugins/deadman-switch');
+// DMS_CONFIG_DIR env override exists for testing only; unset on Unraid
+define('DMS_CONFIG_DIR', getenv('DMS_CONFIG_DIR') ?: '/boot/config/plugins/deadman-switch');
 define('DMS_CONFIG_FILE', DMS_CONFIG_DIR . '/config.json');
 define('DMS_STATE_FILE', DMS_CONFIG_DIR . '/state.json');
 define('DMS_LOG_DIR', DMS_CONFIG_DIR . '/logs');
@@ -19,6 +20,37 @@ define('DMS_VERSION', (function() {
     }
     return 'unknown';
 })());
+
+// Set by dms_load_state()/dms_load_config() when the file on flash is present
+// but unreadable and no usable .bak exists; read via dms_*_load_error()
+$GLOBALS['dms_load_error'] = ['state' => null, 'config' => null];
+
+function dms_state_load_error() {
+    return $GLOBALS['dms_load_error']['state'] ?? null;
+}
+
+function dms_config_load_error() {
+    return $GLOBALS['dms_load_error']['config'] ?? null;
+}
+
+// Parse an ISO timestamp; null when empty or unparseable (never false/0, so
+// arithmetic on a bad value can't silently produce an epoch-1970 deadline)
+function dms_parse_time($iso) {
+    $t = is_string($iso) && $iso !== '' ? strtotime($iso) : false;
+    return $t === false ? null : $t;
+}
+
+// [array|null $data, 'ok'|'missing'|'recovered'|'corrupt', int $bytes]
+function dms_load_json_file($file) {
+    if (!file_exists($file)) return [null, 'missing', 0];
+    $raw = @file_get_contents($file);
+    $n = strlen((string)$raw);
+    $data = ($raw !== false && $raw !== '') ? json_decode($raw, true) : null;
+    if (is_array($data)) return [$data, 'ok', $n];
+    $bak = @file_get_contents($file . '.bak');
+    $bdata = ($bak !== false && $bak !== '') ? json_decode($bak, true) : null;
+    return is_array($bdata) ? [$bdata, 'recovered', $n] : [null, 'corrupt', $n];
+}
 
 function dms_get_api_base($config = null) {
     if ($config === null) $config = dms_load_config();
@@ -40,9 +72,8 @@ function dms_ensure_dirs() {
     }
 }
 
-function dms_load_config() {
-    dms_ensure_dirs();
-    $defaults = [
+function dms_config_defaults() {
+    return [
         'checkin_interval_days'       => 30,
         'grace_period_hours'          => 48,
         'external_url'                => '',
@@ -73,33 +104,121 @@ function dms_load_config() {
         ],
         'pause_max_hours'             => 720,
     ];
+}
 
-    if (!file_exists(DMS_CONFIG_FILE)) {
+// Repair types and clamp numeric settings. Idempotent: f(f(x)) === f(x).
+// Legacy configs can carry null for any key (a null wins over the default in
+// array_replace_recursive), and a zero interval divides by zero in 'status'.
+function dms_sanitize_config(array $c): array {
+    $d = dms_config_defaults();
+    $int = function($v, $def, $min, $max) { $n = intval($v ?? 0) ?: $def; return max($min, min($max, $n)); };
+    foreach (['warning_thresholds', 'webhooks', 'uptime_kuma', 'actions'] as $k) {
+        if (!is_array($c[$k] ?? null)) $c[$k] = $d[$k];
+    }
+    foreach (['discord', 'custom'] as $k) {
+        $c['webhooks'][$k] = array_replace($d['webhooks'][$k], is_array($c['webhooks'][$k] ?? null) ? $c['webhooks'][$k] : []);
+    }
+    foreach (['deletions', 'scripts'] as $k) {
+        if (!is_array($c['actions'][$k] ?? null)) $c['actions'][$k] = [];
+    }
+    $c['checkin_interval_days'] = $int($c['checkin_interval_days'] ?? null, 30, 1, 365);
+    $c['grace_period_hours']    = $int($c['grace_period_hours'] ?? null, 48, 1, 720);
+    $c['cron_interval_minutes'] = $int($c['cron_interval_minutes'] ?? null, 60, 5, 1440);
+    $c['pause_max_hours']       = $int($c['pause_max_hours'] ?? null, 720, 1, 8760);
+    foreach (['reminder' => 50, 'warning' => 75, 'critical' => 90, 'last_chance' => 95] as $t => $def) {
+        $c['warning_thresholds'][$t] = $int($c['warning_thresholds'][$t] ?? null, $def, 1, 100);
+    }
+    $c['uptime_kuma']['warning_days'] = $int($c['uptime_kuma']['warning_days'] ?? null, 7, 1, 365);
+    foreach ($c['actions']['scripts'] as $i => $s) {   // index loop: no reference, no unset($s) hazard
+        if (!is_array($s)) { unset($c['actions']['scripts'][$i]); continue; }
+        $c['actions']['scripts'][$i]['timeout'] = $int($s['timeout'] ?? null, 300, 10, 3600);
+    }
+    $c['actions']['scripts']   = array_values($c['actions']['scripts']);
+    $c['actions']['deletions'] = array_values(array_filter($c['actions']['deletions'], 'is_array'));
+    $c['dry_run']               = isset($c['dry_run']) ? (bool)$c['dry_run'] : true;   // null must never mean "off"
+    $c['double_miss']           = (bool)($c['double_miss'] ?? false);
+    $c['has_completed_dry_run'] = (bool)($c['has_completed_dry_run'] ?? false);
+    return $c;
+}
+
+function dms_load_config() {
+    static $corrupt_logged = false;
+    dms_ensure_dirs();
+    $GLOBALS['dms_load_error']['config'] = null;
+    $defaults = dms_config_defaults();
+
+    [$data, $status, $bytes] = dms_load_json_file(DMS_CONFIG_FILE);
+
+    if ($status === 'missing') {
         dms_save_config($defaults);
         return $defaults;
     }
 
-    $config = json_decode(file_get_contents(DMS_CONFIG_FILE), true);
-    if (!is_array($config)) {
+    if ($status === 'corrupt') {
+        $msg = "config.json is present but not valid JSON ($bytes bytes) and no usable config.json.bak exists";
+        $GLOBALS['dms_load_error']['config'] = $msg;
+        if (!$corrupt_logged) {
+            dms_log($msg, 'ERROR');
+            $corrupt_logged = true;
+        }
         return $defaults;
     }
 
-    return array_replace_recursive($defaults, $config);
+    $config = array_replace_recursive($defaults, $data);
+
+    if ($status === 'recovered') {
+        // Written directly (not via dms_update_config, which would recurse);
+        // [] = leave the good .bak alone
+        $ok = dms_write_json_atomic(DMS_CONFIG_FILE, $config, []);
+        dms_log("config.json unreadable ($bytes bytes); restored from config.json.bak" .
+                ($ok ? '' : ' (in memory only: rewriting config.json FAILED)') .
+                ". Verify Settings and Actions.", 'ERROR');
+    }
+
+    // Read-side repair only; the sanitized form reaches disk at the next save
+    return dms_sanitize_config($config);
 }
 
 function dms_save_config($config) {
     dms_ensure_dirs();
-    dms_write_json_atomic(DMS_CONFIG_FILE, $config);
+    return dms_write_json_atomic(DMS_CONFIG_FILE, $config);
 }
 
-// Write via temp file + rename so concurrent readers never see a truncated file
-function dms_write_json_atomic($file, $data) {
-    $tmp = $file . '.tmp.' . getmypid();
-    if (file_put_contents($tmp, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES), LOCK_EX) === false) {
+// Write via temp file + rename so concurrent readers never see a truncated file.
+// $backup_keys decides when the previous (parseable) file is kept as .bak:
+// null = on every write, [] = never, list = when any listed key changes.
+function dms_write_json_atomic($file, $data, $backup_keys = null) {
+    $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+    if ($json === false || $json === '') {
+        dms_log('JSON encode failed for ' . basename($file) . ': ' . json_last_error_msg(), 'ERROR');
         return false;
+    }
+    $tmp = $file . '.tmp.' . getmypid();
+    $w = @file_put_contents($tmp, $json, LOCK_EX);
+    if ($w === false || $w !== strlen($json)) {
+        @unlink($tmp);
+        dms_log('Short write to ' . basename($tmp) . ' (' . var_export($w, true) . ' of ' . strlen($json) . ' bytes)', 'ERROR');
+        return false;
+    }
+    // Previous good version -> .bak, only if the live file parses (a corrupt
+    // file must never clobber a good .bak) and only on a semantic change
+    if (file_exists($file) && is_array($cur = json_decode((string)@file_get_contents($file), true))) {
+        $changed = $backup_keys === null;
+        foreach ((array)$backup_keys as $k) {
+            if (($cur[$k] ?? null) !== ($data[$k] ?? null)) { $changed = true; break; }
+        }
+        if ($changed) {
+            if (!@copy($file, $file . '.bak.tmp')) {
+                dms_log('Could not copy ' . basename($file) . ' to .bak.tmp; backup not refreshed', 'WARN');
+            } elseif (!@rename($file . '.bak.tmp', $file . '.bak')) {
+                @unlink($file . '.bak.tmp');
+                dms_log('Could not rename .bak.tmp to ' . basename($file) . '.bak; backup not refreshed', 'WARN');
+            }
+        }
     }
     if (!rename($tmp, $file)) {
         @unlink($tmp);
+        dms_log('rename failed for ' . basename($file), 'ERROR');
         return false;
     }
     return true;
@@ -113,9 +232,22 @@ function dms_update_state($fn) {
     $lock = @fopen(DMS_STATE_FILE . '.lock', 'c');
     if ($lock) flock($lock, LOCK_EX);
     $state = dms_load_state();
+    // Checked inside the lock, after the load: never overwrite an unreadable
+    // state.json with defaults (that would silently disarm the switch)
+    if (dms_state_load_error() !== null) {
+        if ($lock) {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+        dms_log('Refusing to overwrite unreadable state.json', 'ERROR');
+        return false;
+    }
     $result = $fn($state);
     if (is_array($result)) $state = $result;
-    $ok = dms_write_json_atomic(DMS_STATE_FILE, $state);
+    // .bak only on a semantic change: token mints, notification levels and
+    // failure markers must not churn the backup of the last good state
+    $ok = dms_write_json_atomic(DMS_STATE_FILE, $state,
+        ['armed', 'triggered', 'trigger_time', 'paused', 'pause_start', 'last_checkin', 'grace_period_start', 'missed_count']);
     if ($lock) {
         flock($lock, LOCK_UN);
         fclose($lock);
@@ -129,9 +261,17 @@ function dms_update_config($fn) {
     $lock = @fopen(DMS_CONFIG_FILE . '.lock', 'c');
     if ($lock) flock($lock, LOCK_EX);
     $config = dms_load_config();
+    if (dms_config_load_error() !== null) {
+        if ($lock) {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+        dms_log('Refusing to overwrite unreadable config.json', 'ERROR');
+        return false;
+    }
     $result = $fn($config);
     if (is_array($result)) $config = $result;
-    $ok = dms_write_json_atomic(DMS_CONFIG_FILE, $config);
+    $ok = dms_write_json_atomic(DMS_CONFIG_FILE, $config, null);
     if ($lock) {
         flock($lock, LOCK_UN);
         fclose($lock);
@@ -141,7 +281,9 @@ function dms_update_config($fn) {
 }
 
 function dms_load_state() {
+    static $corrupt_logged = false;
     dms_ensure_dirs();
+    $GLOBALS['dms_load_error']['state'] = null;
     $defaults = [
         'armed'                    => false,
         'last_checkin'             => null,
@@ -156,37 +298,84 @@ function dms_load_state() {
         'missed_count'             => 0,
         'last_notification_level'  => null,
         'quick_checkin_tokens'     => [],
+        'last_notify_failure'      => null,
+        'recovered_at'             => null,
     ];
 
-    if (!file_exists(DMS_STATE_FILE)) {
+    [$data, $status, $bytes] = dms_load_json_file(DMS_STATE_FILE);
+
+    if ($status === 'missing') {
         dms_save_state($defaults);
         return $defaults;
     }
 
-    $state = json_decode(file_get_contents(DMS_STATE_FILE), true);
-    if (!is_array($state)) {
+    if ($status === 'corrupt') {
+        $msg = "state.json is present but not valid JSON ($bytes bytes) and no usable state.json.bak exists";
+        $GLOBALS['dms_load_error']['state'] = $msg;
+        if (!$corrupt_logged) {
+            dms_log($msg, 'ERROR');
+            $corrupt_logged = true;
+        }
         return $defaults;
     }
 
-    return array_replace_recursive($defaults, $state);
+    $state = array_replace_recursive($defaults, $data);
+    foreach (['checkin_history', 'quick_checkin_tokens'] as $k) {
+        if (!is_array($state[$k])) $state[$k] = [];
+    }
+
+    if ($status === 'recovered') {
+        // The .bak lags one semantic change behind (usually the previous
+        // check-in), so its deadline may be stale or already past. Restore it
+        // but DISARM as a precaution: a restore must never run actions. The
+        // user verifies Last Check-in and re-arms. recovered_at drives the
+        // Settings banner and is cleared by a check-in, arm or disarm.
+        // triggered/trigger_time, last_checkin, history and tokens stay as restored.
+        $state['armed'] = false;
+        $state['paused'] = false;
+        $state['pause_start'] = null;
+        $state['pause_expires'] = null;
+        $state['grace_period_start'] = null;
+        $state['missed_count'] = 0;
+        $state['last_notification_level'] = null;
+        $state['recovered_at'] = date('c');
+        // Written directly: dms_update_state() would recurse into this loader.
+        // [] = leave the good .bak alone
+        $ok = dms_write_json_atomic(DMS_STATE_FILE, $state, []);
+        dms_log("state.json unreadable ($bytes bytes); restored from state.json.bak and DISARMED as a precaution" .
+                " — re-arm in Settings after verifying it." .
+                ($ok ? '' : ' (In memory only: rewriting state.json FAILED.)') .
+                " last_checkin=" . ($state['last_checkin'] ?? 'never'), 'ERROR');
+    }
+
+    return $state;
 }
 
 function dms_save_state($state) {
     dms_ensure_dirs();
-    dms_write_json_atomic(DMS_STATE_FILE, $state);
+    return dms_write_json_atomic(DMS_STATE_FILE, $state);
 }
 
 function dms_log($message, $level = 'INFO') {
     dms_ensure_dirs();
     $timestamp = date('Y-m-d H:i:s');
     $line = "[$timestamp] [$level] $message\n";
-    file_put_contents(DMS_LOG_FILE, $line, FILE_APPEND | LOCK_EX);
+    @file_put_contents(DMS_LOG_FILE, $line, FILE_APPEND | LOCK_EX);
+    // Mirror serious problems to syslog: still visible if the flash log is
+    // unwritable, and shows up under Tools > Syslog
+    if ($level === 'ERROR' || $level === 'CRITICAL') {
+        @openlog('deadman-switch', LOG_PID, LOG_USER);
+        @syslog(LOG_ERR, $message);
+        @closelog();
+    }
 }
 
+// null when there is no check-in or it can't be parsed. Callers must treat
+// null as "unknown", never as "expired".
 function dms_get_deadline($config, $state) {
-    if (!$state['last_checkin']) return null;
-    $interval_seconds = $config['checkin_interval_days'] * 86400;
-    return strtotime($state['last_checkin']) + $interval_seconds;
+    $last = dms_parse_time($state['last_checkin'] ?? null);
+    if ($last === null) return null;
+    return $last + $config['checkin_interval_days'] * 86400;
 }
 
 function dms_get_grace_end($config, $state) {
@@ -210,6 +399,8 @@ function dms_get_warning_level($config, $state) {
     }
 
     $remaining = dms_time_remaining($config, $state);
+    // Unparseable last_checkin: unknown, not expired (null <= 0 is true in PHP)
+    if ($remaining === null) return 'none';
     $total = $config['checkin_interval_days'] * 86400;
 
     if ($remaining <= 0) {
@@ -253,33 +444,43 @@ function dms_generate_api_key() {
     return 'dms_' . bin2hex(random_bytes(20));
 }
 
-// $state param kept for caller compatibility but ignored: the token is added
-// to freshly loaded state under lock, so a caller's stale copy can never
-// clobber a check-in or another caller's token.
-function dms_create_quick_checkin_token($state = null) {
+// The token is added to freshly loaded state under lock, so a caller's stale
+// copy can never clobber a check-in or another caller's token. Returns null
+// when the token could not be saved (a link to it would never work).
+function dms_create_quick_checkin_token() {
     $token = dms_generate_token(16);
-    dms_update_state(function($s) use ($token) {
+    $r = dms_update_state(function($s) use ($token) {
         $s['quick_checkin_tokens'][$token] = [
             'created' => date('c'),
             'expires' => date('c', time() + 72 * 3600),
             'used'    => false,
         ];
-        // Prune expired tokens
+        // Prune expired tokens (an unparseable expiry counts as expired)
         foreach ($s['quick_checkin_tokens'] as $t => $info) {
-            if (strtotime($info['expires']) < time()) {
+            $exp = dms_parse_time($info['expires'] ?? null);
+            if ($exp === null || $exp < time()) {
                 unset($s['quick_checkin_tokens'][$t]);
             }
         }
         return $s;
     });
-    return $token;
+    return $r === false ? null : $token;
+}
+
+// One link builder for templates and embeds. null = offer no link
+// (disarmed, triggered, or the token mint failed)
+function dms_make_checkin_link($config, $state) {
+    if (empty($state['armed']) || !empty($state['triggered'])) return null;
+    $token = dms_create_quick_checkin_token();
+    return $token === null ? null : dms_get_api_base($config) . '/?action=quickcheckin&token=' . $token;
 }
 
 function dms_validate_quick_checkin_token($token, $state) {
     if (!isset($state['quick_checkin_tokens'][$token])) return false;
     $info = $state['quick_checkin_tokens'][$token];
-    if ($info['used']) return false;
-    if (strtotime($info['expires']) < time()) return false;
+    if (!is_array($info) || !empty($info['used'])) return false;
+    $exp = dms_parse_time($info['expires'] ?? null);
+    if ($exp === null || $exp < time()) return false;
     return true;
 }
 
@@ -287,17 +488,19 @@ function dms_use_quick_checkin_token($token, &$state) {
     // Validate and mark used inside the locked update so a token can't be
     // spent twice by concurrent requests
     $ok = false;
-    dms_update_state(function($s) use ($token, &$ok) {
-        if (isset($s['quick_checkin_tokens'][$token])) {
+    $r = dms_update_state(function($s) use ($token, &$ok) {
+        if (isset($s['quick_checkin_tokens'][$token]) && is_array($s['quick_checkin_tokens'][$token])) {
             $info = $s['quick_checkin_tokens'][$token];
-            if (!$info['used'] && strtotime($info['expires']) >= time()) {
+            $exp = dms_parse_time($info['expires'] ?? null);
+            if (empty($info['used']) && $exp !== null && $exp >= time()) {
                 $s['quick_checkin_tokens'][$token]['used'] = true;
                 $ok = true;
             }
         }
         return $s;
     });
-    return $ok;
+    // Spent only if the 'used' mark actually reached disk
+    return $ok && $r !== false;
 }
 
 function dms_do_checkin($method = 'web') {
@@ -308,6 +511,7 @@ function dms_do_checkin($method = 'web') {
         $state['missed_count'] = 0;
         $state['last_notification_level'] = null;
         $state['grace_period_start'] = null;
+        $state['recovered_at'] = null;   // user has seen and confirmed the state
 
         // Add to history (keep last 10)
         array_unshift($state['checkin_history'], [
@@ -346,9 +550,7 @@ function dms_render_template($template, $config, $state) {
     $hours = $remaining ? max(0, round($remaining / 3600)) : 0;
     $status = dms_get_status($config, $state);
 
-    $api_base = dms_get_api_base($config);
-    $token = dms_create_quick_checkin_token();
-    $checkin_link = "$api_base/?action=quickcheckin&token=$token";
+    $checkin_link = dms_make_checkin_link($config, $state) ?? 'N/A';
 
     $vars = [
         '{{status}}'          => strtoupper(str_replace('_', ' ', $status)),
@@ -448,8 +650,9 @@ function dms_build_discord_embed($config, $state) {
         $fields[] = ['name' => 'Deadline', 'value' => date('l, F j, Y \a\t g:i A', $deadline), 'inline' => false];
     }
 
-    if ($state['last_checkin']) {
-        $fields[] = ['name' => 'Last Check-in', 'value' => date('l, F j, Y \a\t g:i A', strtotime($state['last_checkin'])), 'inline' => false];
+    $last_ts = dms_parse_time($state['last_checkin'] ?? null);
+    if ($last_ts !== null) {
+        $fields[] = ['name' => 'Last Check-in', 'value' => date('l, F j, Y \a\t g:i A', $last_ts), 'inline' => false];
     }
 
     if ($status === 'grace_period') {
@@ -459,11 +662,9 @@ function dms_build_discord_embed($config, $state) {
         }
     }
 
-    if ($state['armed'] && !$state['triggered']) {
-        $api_base = dms_get_api_base($config);
-        $token = dms_create_quick_checkin_token();
-        $checkin_link = "$api_base/?action=quickcheckin&token=$token";
-        $fields[] = ['name' => 'Check In', 'value' => "[Click here to check in]($checkin_link)", 'inline' => false];
+    $link = dms_make_checkin_link($config, $state);
+    if ($link !== null) {
+        $fields[] = ['name' => 'Check In', 'value' => "[Click here to check in]($link)", 'inline' => false];
     }
 
     $hostname = gethostname() ?: 'Unraid';

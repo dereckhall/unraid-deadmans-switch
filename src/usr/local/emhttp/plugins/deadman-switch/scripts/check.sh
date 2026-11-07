@@ -62,6 +62,12 @@ RESULT=$(php -r "
     \$config = dms_load_config();
     \$state = dms_load_state();
 
+    // Fail closed: an unreadable file means we don't know the real state, and
+    // an unparseable last_checkin would give a null deadline (null <= 0 and
+    // time() >= null both hold in PHP, i.e. a wrong TRIGGER)
+    if (dms_state_load_error() !== null || dms_config_load_error() !== null) { echo 'STATUS:state_unreadable'; exit; }
+    if (\$state['last_checkin'] !== null && dms_parse_time(\$state['last_checkin']) === null) { echo 'STATUS:state_invalid'; exit; }
+
     // Check if armed
     if (!\$state['armed']) {
         echo 'STATUS:disarmed';

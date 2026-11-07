@@ -149,6 +149,7 @@ switch ($action) {
             $s['paused'] = false;
             $s['pause_start'] = null;
             $s['pause_expires'] = null;
+            $s['recovered_at'] = null;
             array_unshift($s['checkin_history'], ['time' => $now, 'method' => 'arm']);
             $s['checkin_history'] = array_slice($s['checkin_history'], 0, 10);
             return $s;
@@ -165,6 +166,7 @@ switch ($action) {
             $s['grace_period_start'] = null;
             $s['missed_count'] = 0;
             $s['last_notification_level'] = null;
+            $s['recovered_at'] = null;
             return $s;
         });
         dms_log("Switch DISARMED");
@@ -232,21 +234,15 @@ switch ($action) {
             if (isset($input['actions']['scripts']) && is_array($input['actions']['scripts'])) {
                 $c['actions']['scripts'] = array_values($input['actions']['scripts']);
             }
-            // Clamp numeric settings server-side: a cleared UI field arrives
-            // as null and would otherwise zero the interval, making the
-            // deadline equal to the last check-in (instant grace period)
-            $c['checkin_interval_days'] = max(1, min(365, intval($c['checkin_interval_days'] ?? 0) ?: 30));
-            $c['grace_period_hours']    = max(1, min(720, intval($c['grace_period_hours'] ?? 0) ?: 48));
-            $c['cron_interval_minutes'] = max(5, min(1440, intval($c['cron_interval_minutes'] ?? 0) ?: 60));
-            $c['pause_max_hours']       = max(1, min(8760, intval($c['pause_max_hours'] ?? 0) ?: 720));
-            foreach (['reminder' => 50, 'warning' => 75, 'critical' => 90, 'last_chance' => 95] as $t => $def) {
-                $c['warning_thresholds'][$t] = max(1, min(100, intval($c['warning_thresholds'][$t] ?? 0) ?: $def));
-            }
-            return $c;
+            // Repair types and clamp numeric settings server-side: a cleared
+            // UI field arrives as null and would otherwise zero the interval,
+            // making the deadline equal to the last check-in (instant grace)
+            return dms_sanitize_config($c);
         });
         if (!is_array($config)) {
             http_response_code(500);
-            echo json_encode(['error' => 'Failed to write config file (flash full or read-only?)']);
+            $load_err = dms_config_load_error();
+            echo json_encode(['error' => $load_err ?? 'Failed to write config file (flash full or read-only?)']);
             break;
         }
 

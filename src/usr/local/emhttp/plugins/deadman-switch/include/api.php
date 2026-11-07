@@ -11,7 +11,6 @@ header('Content-Type: application/json');
 
 $action = $_GET['action'] ?? ($_POST['action'] ?? '');
 $key = $_SERVER['HTTP_X_API_KEY'] ?? ($_GET['key'] ?? '');
-$token = $_GET['token'] ?? '';
 
 // Unraid's CSRF check only covers POST, so mutating actions must not be
 // reachable via GET (a bare link could otherwise disarm the switch)
@@ -42,46 +41,9 @@ switch ($action) {
             echo json_encode(['error' => 'Invalid API key']);
             break;
         }
-        $status = dms_get_status($config, $state);
-        $remaining = dms_time_remaining($config, $state);
-        $deadline = dms_get_deadline($config, $state);
-        $grace_end = dms_get_grace_end($config, $state);
-        $warning_level = dms_get_warning_level($config, $state);
-
-        // Set HTTP status code for simple monitors
-        $elapsed_pct = 0;
-        if ($remaining !== null) {
-            $total = $config['checkin_interval_days'] * 86400;
-            $elapsed_pct = (($total - $remaining) / $total) * 100;
-        }
-
-        if ($status === 'triggered') {
-            http_response_code(410);
-        } elseif ($status === 'grace_period') {
-            http_response_code(503);
-        } elseif (in_array($warning_level, ['critical', 'last_chance'])) {
-            http_response_code(429);
-        } elseif ($elapsed_pct >= 75) {
-            http_response_code(299);
-        }
-        // else 200
-
-        echo json_encode([
-            'status'                                  => $status,
-            'armed'                                   => $state['armed'],
-            'days_remaining'                          => $remaining !== null ? round($remaining / 86400, 1) : null,
-            'hours_remaining'                         => $remaining !== null ? round($remaining / 3600) : null,
-            'check_in_interval_days'                  => $config['checkin_interval_days'],
-            'last_checkin'                             => $state['last_checkin'],
-            'next_deadline'                            => $deadline ? date('c', $deadline) : null,
-            'grace_period_ends'                        => ($status === 'grace_period' && $grace_end) ? date('c', $grace_end) : null,
-            'warning_level'                            => $warning_level,
-            'paused'                                   => $state['paused'],
-            'pause_expires'                            => $state['pause_expires'],
-            'configured_actions_count'                 => count($config['actions']['deletions']) + count($config['actions']['scripts']),
-            'dry_run'                                  => $config['dry_run'],
-            'version'                                  => DMS_VERSION,
-        ]);
+        $p = dms_status_payload($config, $state);
+        http_response_code($p['http']);
+        echo json_encode($p['body']);
         break;
 
     case 'checkin':
@@ -94,33 +56,21 @@ switch ($action) {
             echo json_encode(['success' => false, 'message' => 'Switch is not armed']);
             break;
         }
-        dms_do_checkin('api');
+        if ($state['triggered']) {
+            echo json_encode(['success' => false, 'message' => 'Switch has triggered; disarm and re-arm first']);
+            break;
+        }
+        if (dms_do_checkin('api') === false) {
+            http_response_code(500);
+            echo json_encode(['success' => false, 'error' => dms_state_load_error() ?? 'Failed to write state file (flash full or read-only?)']);
+            break;
+        }
         echo json_encode(['success' => true, 'message' => 'Check-in recorded']);
         break;
 
-    case 'quickcheckin':
-        if (!$token) {
-            http_response_code(400);
-            echo json_encode(['error' => 'Token required']);
-            break;
-        }
-        if (!dms_validate_quick_checkin_token($token, $state)) {
-            header('Content-Type: text/html; charset=utf-8');
-            echo dms_quick_checkin_page('invalid');
-            break;
-        }
-        // Show confirmation page on GET
-        if ($_SERVER['REQUEST_METHOD'] === 'GET' && !isset($_GET['confirm'])) {
-            header('Content-Type: text/html; charset=utf-8');
-            echo dms_quick_checkin_page('confirm', $token);
-            break;
-        }
-        // Process check-in
-        dms_use_quick_checkin_token($token, $state);
-        dms_do_checkin('quick_link');
-        header('Content-Type: text/html; charset=utf-8');
-        echo dms_quick_checkin_page('success');
-        break;
+    // quickcheckin lives only on the port-3801 API (external-api.php): check-in
+    // links always target it, and Unraid's CSRF prepend would reject the
+    // confirm page's POST here
 
     // Internal AJAX actions (called from the plugin UI, protected by Unraid auth)
     case 'web_checkin':
@@ -128,7 +78,15 @@ switch ($action) {
             echo json_encode(['success' => false, 'message' => 'Switch is not armed']);
             break;
         }
-        dms_do_checkin('web');
+        if ($state['triggered']) {
+            echo json_encode(['success' => false, 'message' => 'Switch has triggered; disarm and re-arm first']);
+            break;
+        }
+        if (dms_do_checkin('web') === false) {
+            http_response_code(500);
+            echo json_encode(['success' => false, 'error' => dms_state_load_error() ?? 'Failed to write state file (flash full or read-only?)']);
+            break;
+        }
         echo json_encode(['success' => true, 'message' => 'Check-in recorded']);
         break;
 
@@ -138,7 +96,7 @@ switch ($action) {
             break;
         }
         $now = date('c');
-        dms_update_state(function($s) use ($now) {
+        $r = dms_update_state(function($s) use ($now) {
             $s['armed'] = true;
             $s['triggered'] = false;
             $s['trigger_time'] = null;
@@ -154,12 +112,18 @@ switch ($action) {
             $s['checkin_history'] = array_slice($s['checkin_history'], 0, 10);
             return $s;
         });
+        if ($r === false) {
+            http_response_code(500);
+            echo json_encode(['success' => false, 'error' => dms_state_load_error() ?? 'Failed to write state file (flash full or read-only?)']);
+            break;
+        }
+        dms_clear_trigger_marker();
         dms_log("Switch ARMED");
         echo json_encode(['success' => true]);
         break;
 
     case 'disarm':
-        dms_update_state(function($s) {
+        $r = dms_update_state(function($s) {
             $s['armed'] = false;
             $s['triggered'] = false;
             $s['trigger_time'] = null;
@@ -169,6 +133,12 @@ switch ($action) {
             $s['recovered_at'] = null;
             return $s;
         });
+        if ($r === false) {
+            http_response_code(500);
+            echo json_encode(['success' => false, 'error' => dms_state_load_error() ?? 'Failed to write state file (flash full or read-only?)']);
+            break;
+        }
+        dms_clear_trigger_marker();
         dms_log("Switch DISARMED");
         echo json_encode(['success' => true]);
         break;
@@ -282,10 +252,15 @@ switch ($action) {
 
     case 'generate_api_key':
         $new_key = dms_generate_api_key();
-        dms_update_config(function($c) use ($new_key) {
+        $r = dms_update_config(function($c) use ($new_key) {
             $c['api_key'] = $new_key;
             return $c;
         });
+        if ($r === false) {
+            http_response_code(500);
+            echo json_encode(['success' => false, 'error' => dms_config_load_error() ?? 'Failed to write config file (flash full or read-only?)']);
+            break;
+        }
         dms_log("New API key generated");
         echo json_encode(['success' => true, 'api_key' => $new_key]);
         break;
@@ -298,10 +273,15 @@ switch ($action) {
 
     case 'dry_run':
         $result = dms_execute_dry_run($config);
-        dms_update_config(function($c) {
+        $r = dms_update_config(function($c) {
             $c['has_completed_dry_run'] = true;
             return $c;
         });
+        if ($r === false) {
+            // The dry run itself ran; only recording it failed (arming stays blocked)
+            echo json_encode(['success' => true, 'warning' => 'Dry run ran but could not be recorded', 'results' => $result]);
+            break;
+        }
         echo json_encode(['success' => true, 'results' => $result]);
         break;
 
@@ -341,78 +321,4 @@ switch ($action) {
         http_response_code(400);
         echo json_encode(['error' => 'Unknown action']);
         break;
-}
-
-// HTML page rendering functions (used by quickcheckin endpoint)
-
-function dms_quick_checkin_page($status, $token = '') {
-    $confirm_url = '';
-    if ($token) {
-        $confirm_url = "?action=quickcheckin&token=" . htmlspecialchars($token) . "&confirm=1";
-    }
-
-    $title = "Dead Man's Switch";
-    $body = '';
-
-    switch ($status) {
-        case 'confirm':
-            $body = <<<HTML
-            <div class="dms-card">
-                <h1>$title</h1>
-                <p>Click below to confirm your check-in.</p>
-                <a href="$confirm_url" class="dms-btn dms-btn-checkin">CONFIRM CHECK-IN</a>
-            </div>
-HTML;
-            break;
-        case 'success':
-            $body = <<<HTML
-            <div class="dms-card">
-                <h1>$title</h1>
-                <div class="dms-success">Check-in successful!</div>
-                <p>Your dead man's switch timer has been reset.</p>
-            </div>
-HTML;
-            break;
-        case 'invalid':
-            $body = <<<HTML
-            <div class="dms-card">
-                <h1>$title</h1>
-                <div class="dms-error">This check-in link is invalid or has expired.</div>
-                <p>Please use the Unraid web UI or request a new check-in link.</p>
-            </div>
-HTML;
-            break;
-    }
-
-    return dms_standalone_page($body);
-}
-
-function dms_standalone_page($body) {
-    return <<<HTML
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Dead Man's Switch</title>
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1c1b29; color: #e0e0e0; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
-        .dms-card { background: #2b2a3d; border-radius: 12px; padding: 40px; max-width: 480px; width: 100%; text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
-        h1 { color: #ff8c00; margin-bottom: 20px; font-size: 1.5em; }
-        p { margin: 15px 0; color: #b0b0b0; line-height: 1.5; }
-        .dms-btn { display: inline-block; padding: 16px 48px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 1.2em; margin: 20px 0; transition: all 0.2s; }
-        .dms-btn-checkin { background: #4caf50; color: white; }
-        .dms-btn-checkin:hover { background: #45a049; transform: scale(1.05); }
-        .dms-btn-warning { background: #ff9800; color: white; }
-        .dms-btn-warning:hover { background: #f57c00; transform: scale(1.05); }
-        .dms-success { background: #1b5e20; color: #a5d6a7; padding: 16px; border-radius: 8px; margin: 20px 0; font-size: 1.2em; }
-        .dms-error { background: #b71c1c; color: #ef9a9a; padding: 16px; border-radius: 8px; margin: 20px 0; }
-    </style>
-</head>
-<body>
-    $body
-</body>
-</html>
-HTML;
 }

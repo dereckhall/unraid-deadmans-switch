@@ -135,7 +135,6 @@ RESULT=$(php -r "
     }
 
     \$remaining = dms_time_remaining(\$config, \$state);
-    \$total = \$config['checkin_interval_days'] * 86400;
     \$warning_level = dms_get_warning_level(\$config, \$state);
     \$last_level = \$state['last_notification_level'];
 

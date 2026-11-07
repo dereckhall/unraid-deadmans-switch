@@ -464,6 +464,68 @@ function dms_get_status($config, $state) {
     return 'armed_ok';
 }
 
+// Shared 'status' response for api.php and external-api.php (port 3801).
+// Field order and HTTP codes are what Home Assistant / monitors consume:
+// 410 triggered, 503 grace, 429 critical/last_chance, 299 >= 75% elapsed, else 200.
+function dms_status_payload($config, $state) {
+    $status = dms_get_status($config, $state);
+    $remaining = dms_time_remaining($config, $state);
+    $deadline = dms_get_deadline($config, $state);
+    $grace_end = dms_get_grace_end($config, $state);
+    $warning_level = dms_get_warning_level($config, $state);
+
+    // The sanitized config guarantees an interval of at least 1 day
+    $elapsed_pct = 0;
+    if ($remaining !== null) {
+        $total = max(1, intval($config['checkin_interval_days'])) * 86400;
+        $elapsed_pct = round((($total - $remaining) / $total) * 100, 1);
+    }
+
+    $http = 200;
+    if ($status === 'triggered') {
+        $http = 410;
+    } elseif ($status === 'grace_period') {
+        $http = 503;
+    } elseif (in_array($warning_level, ['critical', 'last_chance'])) {
+        $http = 429;
+    } elseif ($elapsed_pct >= 75) {
+        $http = 299;
+    }
+
+    return ['http' => $http, 'body' => [
+        // Core status
+        'status'                 => $status,
+        'armed'                  => $state['armed'],
+        'paused'                 => $state['paused'],
+        'dry_run'                => $config['dry_run'],
+        'warning_level'          => $warning_level,
+
+        // Timing
+        'seconds_remaining'      => $remaining !== null ? max(0, $remaining) : null,
+        'minutes_remaining'      => $remaining !== null ? max(0, round($remaining / 60)) : null,
+        'hours_remaining'        => $remaining !== null ? max(0, round($remaining / 3600, 1)) : null,
+        'days_remaining'         => $remaining !== null ? max(0, round($remaining / 86400, 1)) : null,
+        'elapsed_pct'            => $elapsed_pct,
+        'time_remaining_display' => $remaining !== null ? dms_format_time_remaining(max(0, $remaining)) : null,
+
+        // Dates (ISO 8601)
+        'last_checkin'           => $state['last_checkin'],
+        'last_checkin_method'    => $state['last_checkin_method'],
+        'next_deadline'          => $deadline ? date('c', $deadline) : null,
+        'grace_period_ends'      => ($status === 'grace_period' && $grace_end) ? date('c', $grace_end) : null,
+        'pause_expires'          => $state['pause_expires'],
+
+        // Config context
+        'checkin_interval_days'  => $config['checkin_interval_days'],
+        'grace_period_hours'     => $config['grace_period_hours'],
+        'actions_configured'     => count($config['actions']['deletions']) + count($config['actions']['scripts']),
+
+        // Meta
+        'version'                => DMS_VERSION,
+        'timestamp'              => date('c'),
+    ]];
+}
+
 function dms_generate_token($length = 32) {
     return bin2hex(random_bytes($length));
 }
@@ -512,7 +574,7 @@ function dms_validate_quick_checkin_token($token, $state) {
     return true;
 }
 
-function dms_use_quick_checkin_token($token, &$state) {
+function dms_use_quick_checkin_token($token) {
     // Validate and mark used inside the locked update so a token can't be
     // spent twice by concurrent requests
     $ok = false;
@@ -528,7 +590,15 @@ function dms_use_quick_checkin_token($token, &$state) {
         return $s;
     });
     // Spent only if the 'used' mark actually reached disk
-    return $ok && $r !== false;
+    return $r !== false && $ok;
+}
+
+// Task 5's trigger.sh creates this marker with mkdir; arm/disarm remove it
+// after their state write succeeded
+function dms_clear_trigger_marker() {
+    $m = DMS_RUN_DIR . '/triggered';
+    @rmdir($m);
+    @unlink($m);
 }
 
 function dms_do_checkin($method = 'web') {
@@ -606,27 +676,8 @@ function dms_get_log_entries($limit = 100, $filter = null) {
     return array_slice($lines, 0, $limit);
 }
 
-function dms_send_unraid_notification($subject, $description, $importance = 'normal', $message = '') {
-    $notify = '/usr/local/emhttp/webGui/scripts/notify';
-    if (!file_exists($notify)) return;
-
-    $cmd = $notify .
-        ' -e ' . escapeshellarg("Dead Man's Switch") .
-        ' -s ' . escapeshellarg($subject) .
-        ' -d ' . escapeshellarg($description) .
-        ' -i ' . escapeshellarg($importance) .
-        ' -l ' . escapeshellarg('/Settings/deadman-switch');
-
-    if ($message) {
-        $cmd .= ' -m ' . escapeshellarg($message);
-    }
-
-    exec($cmd);
-}
-
 function dms_build_discord_embed($config, $state) {
     $status = dms_get_status($config, $state);
-    $warning_level = dms_get_warning_level($config, $state);
     $remaining = dms_time_remaining($config, $state);
     $remaining_text = $remaining !== null ? dms_format_time_remaining($remaining) : 'N/A';
 
@@ -779,7 +830,6 @@ function dms_send_uptime_kuma_heartbeat($config, $state) {
     $remaining = dms_time_remaining($config, $state);
     $days_left = $remaining !== null ? round($remaining / 86400, 1) : null;
     $warning_days = $uk['warning_days'] ?? 7;
-    $status = dms_get_status($config, $state);
 
     // Determine up/down status for Uptime Kuma
     if (!$state['armed']) {
@@ -849,7 +899,7 @@ function dms_update_cron($minutes = 60) {
 function dms_execute_dry_run($config) {
     $results = [];
 
-    foreach ($config['actions']['deletions'] as $i => $deletion) {
+    foreach ($config['actions']['deletions'] as $deletion) {
         $path = $deletion['path'];
         $method = $deletion['method'] ?? 'standard';
         $exists = file_exists($path) || glob($path);
@@ -862,7 +912,7 @@ function dms_execute_dry_run($config) {
         ];
     }
 
-    foreach ($config['actions']['scripts'] as $i => $script) {
+    foreach ($config['actions']['scripts'] as $script) {
         $exists = file_exists($script['path']);
         $executable = $exists && is_executable($script['path']);
         $results[] = [
@@ -876,4 +926,91 @@ function dms_execute_dry_run($config) {
 
     dms_log("Dry run completed - " . count($results) . " actions evaluated", 'INFO');
     return $results;
+}
+
+// Pages served by the quick check-in endpoint (external-api.php, port 3801).
+// The confirm page POSTs back: GETs (link scanners, chat previews) never check in.
+function dms_quick_checkin_page($status, $token = '') {
+    $title = "Dead Man's Switch";
+    $body = '';
+
+    switch ($status) {
+        case 'confirm':
+            $action = htmlspecialchars('?action=quickcheckin&token=' . $token);
+            $body = <<<HTML
+            <div class="dms-card">
+                <h1>$title</h1>
+                <p>Click below to confirm your check-in.</p>
+                <form method="post" action="$action"><button type="submit" class="dms-btn dms-btn-checkin">CONFIRM CHECK-IN</button></form>
+            </div>
+HTML;
+            break;
+        case 'success':
+            $body = <<<HTML
+            <div class="dms-card">
+                <h1>$title</h1>
+                <div class="dms-success">Check-in successful!</div>
+                <p>Your dead man's switch timer has been reset.</p>
+            </div>
+HTML;
+            break;
+        case 'inactive':
+            $body = <<<HTML
+            <div class="dms-card">
+                <h1>$title</h1>
+                <div class="dms-error">The switch is not armed or has already triggered — no check-in was recorded.</div>
+                <p>Open the Unraid web UI to review the switch.</p>
+            </div>
+HTML;
+            break;
+        case 'error':
+            $body = <<<HTML
+            <div class="dms-card">
+                <h1>$title</h1>
+                <div class="dms-error">Could not save the check-in — the flash drive may be full or read-only.</div>
+                <p>Check in from the Unraid web UI and check the flash drive.</p>
+            </div>
+HTML;
+            break;
+        case 'invalid':
+        default:
+            $body = <<<HTML
+            <div class="dms-card">
+                <h1>$title</h1>
+                <div class="dms-error">This check-in link is invalid or has expired.</div>
+                <p>Please use the Unraid web UI or request a new check-in link.</p>
+            </div>
+HTML;
+            break;
+    }
+
+    return dms_standalone_page($body);
+}
+
+function dms_standalone_page($body) {
+    return <<<HTML
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dead Man's Switch</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1c1b29; color: #e0e0e0; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
+        .dms-card { background: #2b2a3d; border-radius: 12px; padding: 40px; max-width: 480px; width: 100%; text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+        h1 { color: #ff8c00; margin-bottom: 20px; font-size: 1.5em; }
+        p { margin: 15px 0; color: #b0b0b0; line-height: 1.5; }
+        .dms-btn { display: inline-block; padding: 16px 48px; border: none; border-radius: 8px; cursor: pointer; font-family: inherit; text-decoration: none; font-weight: bold; font-size: 1.2em; margin: 20px 0; transition: all 0.2s; }
+        .dms-btn-checkin { background: #4caf50; color: white; }
+        .dms-btn-checkin:hover { background: #45a049; transform: scale(1.05); }
+        .dms-success { background: #1b5e20; color: #a5d6a7; padding: 16px; border-radius: 8px; margin: 20px 0; font-size: 1.2em; }
+        .dms-error { background: #b71c1c; color: #ef9a9a; padding: 16px; border-radius: 8px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    $body
+</body>
+</html>
+HTML;
 }

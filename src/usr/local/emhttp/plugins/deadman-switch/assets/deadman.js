@@ -354,8 +354,9 @@ function dmsDryRun() {
                 text += '  ' + r.action + '\n';
                 if (r.exists !== undefined) text += '    Exists: ' + (r.exists ? 'Yes' : 'No') + '\n';
                 if (r.executable !== undefined) text += '    Executable: ' + (r.executable ? 'Yes' : 'No') + '\n';
-                if (r.danger === 'forbidden') text += '    REFUSED: system root\n';
-                else if (r.danger === 'array_root') text += '    DANGEROUS: whole array/pool\n';
+                var via = r.danger_via ? ' (matches ' + r.danger_via + ')' : '';
+                if (r.danger === 'forbidden') text += '    REFUSED: system root' + via + '\n';
+                else if (r.danger === 'array_root') text += '    DANGEROUS: whole array/pool' + via + '\n';
                 if (r.matches && r.matches.length) {
                     text += '    Matches:\n';
                     $.each(r.matches, function(j, m) { text += '      ' + m + '\n'; });

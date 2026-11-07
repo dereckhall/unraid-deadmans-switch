@@ -281,9 +281,9 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
                         <option value="secure" <?= ($deletion['method'] ?? 'standard') === 'secure' ? 'selected' : '' ?>>Secure (shred + rm)</option>
                     </select>
                     <button class="dms-btn dms-btn-danger dms-btn-sm" onclick="dmsRemoveDeletion(this)">Remove</button>
-                    <?php $dms_danger = dms_classify_deletion_path((string)($deletion['path'] ?? '')); ?>
+                    <?php $dms_dd = dms_classify_deletion_path_detail((string)($deletion['path'] ?? '')); $dms_danger = $dms_dd['class']; ?>
                     <?php if ($dms_danger === 'forbidden'): ?>
-                    <span class="dms-path-tag" style="color:#fff;background:#f44336;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:bold">REFUSED at trigger - change this path</span>
+                    <span class="dms-path-tag" style="color:#fff;background:#f44336;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:bold">REFUSED at trigger - change this path<?= $dms_dd['via'] !== null ? ' (matches ' . htmlspecialchars($dms_dd['via']) . ')' : '' ?></span>
                     <?php elseif ($dms_danger === 'array_root'): ?>
                     <span class="dms-path-tag" style="color:#fff;background:#ff9800;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:bold">whole array/pool</span>
                     <?php endif; ?>

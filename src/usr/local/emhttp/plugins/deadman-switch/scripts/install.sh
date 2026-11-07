@@ -34,9 +34,18 @@ fi
 # installed so check.sh cannot fire in between.
 REMOVED_MARKER="$CONFIG_DIR/.removed"
 if [ -f "$REMOVED_MARKER" ]; then
-    php -r 'require_once "/usr/local/emhttp/plugins/deadman-switch/include/helpers.php";
+    # Exit 0 = a decision was reached (disarmed, still armed because the
+    # deadline plus grace period has not passed, or not armed/triggered): the
+    # marker is consumed. Anything else (state or config unreadable, disarm
+    # write failed, PHP failure) keeps it so the next install.sh re-runs the check.
+    if php -r 'require_once $argv[1];
         $c = dms_load_config(); $s = dms_load_state();
-        if (dms_state_load_error() !== null || !$s["armed"] || $s["triggered"]) exit(0);
+        if (dms_state_load_error() !== null || dms_config_load_error() !== null) {
+            dms_log("Reinstalled after removal, but state.json or config.json is unreadable; the reinstall check is postponed to the next install or boot", "ERROR");
+            echo "WARNING: Dead Man'"'"'s Switch state.json or config.json is unreadable; the reinstall check will run again at the next install or boot. Repair the file in /boot/config/plugins/deadman-switch/.\n";
+            exit(2);
+        }
+        if (!$s["armed"] || $s["triggered"]) exit(0);
         $g = dms_get_grace_end($c, $s);
         if ($g !== null && time() >= $g) {
             $did = false;
@@ -49,23 +58,28 @@ if [ -f "$REMOVED_MARKER" ]; then
                 return $s;
             });
             if ($ok === false) {
-                dms_log("Reinstalled after removal with the deadline already passed, but the switch could NOT be disarmed (state write failed). It may trigger on the next cron run.", "ERROR");
+                dms_log("Reinstalled after removal with the deadline plus grace period already passed, but the switch could NOT be disarmed (state write failed). It may trigger on the next cron run.", "ERROR");
                 echo "WARNING: Dead Man'"'"'s Switch deadline passed while uninstalled and the switch could not be disarmed. Check the flash drive and disarm it in Settings.\n";
                 exit(1);
             }
             if (!$did) exit(0);
-            dms_log("Reinstalled after removal with the deadline already passed: switch DISARMED to prevent an immediate trigger. Review Settings and re-arm.", "ERROR");
+            dms_log("Reinstalled after removal with the deadline plus grace period already passed: switch DISARMED to prevent an immediate trigger. Review Settings and re-arm.", "ERROR");
             echo "NOTICE: Dead Man'"'"'s Switch was DISARMED on reinstall (deadline passed while uninstalled). Re-arm it in Settings.\n";
             exit(0);
         }
-        dms_log("Reinstalled after removal; switch is still ARMED (deadline not yet passed)", "WARN");'
-    rm -f "$REMOVED_MARKER"
+        dms_log("Reinstalled after removal; switch is still ARMED (deadline plus grace period not yet passed)", "WARN");' -- "$PLUGIN_DIR/include/helpers.php"; then
+        rm -f "$REMOVED_MARKER"
+    fi
 fi
 
 # Write the cron schedule from the (sanitized, 5..1440) config. One code path:
 # dms_update_cron() builds the line, and leaves the file and the log alone when
 # it is already current. Unraid's update_cron reads *.cron from the config dir.
-php -r 'require_once "/usr/local/emhttp/plugins/deadman-switch/include/helpers.php"; dms_update_cron(dms_load_config()["cron_interval_minutes"]);'
+# An unreadable config.json would yield the defaults: keep the existing file.
+php -r 'require_once $argv[1];
+    $c = dms_load_config();   # load first: the error is only set by a load
+    if (dms_config_load_error() === null) dms_update_cron($c["cron_interval_minutes"]);
+    else dms_log("config.json unreadable at install; keeping the existing cron schedule", "ERROR");' -- "$PLUGIN_DIR/include/helpers.php"
 
 # Remove legacy cron file if present (old versions wrote directly to /etc/cron.d/)
 rm -f /etc/cron.d/deadman-switch

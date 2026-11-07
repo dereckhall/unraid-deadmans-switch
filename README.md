@@ -68,7 +68,7 @@ After installation, go to **Settings > Dead Man's Switch**. The UI has five tabs
 | **Dashboard** | Live countdown, check-in button, arm/disarm/pause controls |
 | **Notifications** | Discord webhooks, custom webhooks, Uptime Kuma push URL, warning thresholds |
 | **Actions** | File/folder deletions (glob patterns supported) and custom script executions, with dry run testing |
-| **Settings** | Check-in interval, grace period, cron frequency, dry run toggle, API key management |
+| **Settings** | Check-in interval, grace period, External API URL, cron frequency, dry run toggle, API key management |
 | **Logs** | Recent activity and check-in history |
 
 ### Message and custom webhook body templates
@@ -96,6 +96,7 @@ The custom webhook's **Body Template** supports the same placeholders plus one m
 - Numbers (`{{days_remaining}}`, `{{hours_remaining}}`) are substituted bare, without quotes, so they can be used as JSON numbers.
 - If a template that starts with `{` or `[` is no longer valid JSON after the placeholders are filled in, the notification is still sent and a WARN line is logged.
 - With method **GET**, the URL is requested as a bare ping: no body is sent and the body template is ignored.
+- Failure alerts sent while the state file is missing, unreadable or not trusted (unreadable state or config, unparseable last check-in, restore from backup, cron check failing, flash drive not writable for double-miss) are sent as the plain alert text, not through the body template, so the template can never report a wrong status.
 
 Example body template:
 
@@ -119,11 +120,11 @@ Saving settings is refused, with a message saying why, when:
 
 - the warning thresholds do not strictly increase (reminder < warning < critical < last chance)
 - the grace period is shorter than one cron check interval (otherwise the grace-period notification may never be sent)
-- a deletion path is a system root: `/`, `/boot`, `/mnt`, `/usr`, `/etc`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/var`, `/proc`, `/sys`, `/dev`, `/run`, `/root`, `/home`, `/tmp` or `/usr/local/emhttp` (symlinks are resolved first). Such a path is also refused when the switch triggers, even if it was saved by an older version: it is skipped with a `REFUSED (system root)` ERROR in the log, and the Actions tab marks it with a red **REFUSED at trigger** tag.
+- a deletion path is a system root: `/`, `/boot`, `/mnt`, `/usr`, `/etc`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/var`, `/proc`, `/sys`, `/dev`, `/run`, `/root`, `/home`, `/tmp` or `/usr/local/emhttp` (symlinks are resolved first), or a glob pattern directly under one of them, such as `/boot/*` or `/etc/*`, which would empty that root. A plain path below a system root without glob characters, such as `/boot/config/myfile`, is allowed. A path is also refused when one of its glob matches is a system root, for example a symlink inside a share that points at `/`; the error names that match (`matches /mnt/user/Media/rootlink -> /`) so you know what to fix. Such a path is also refused when the switch triggers, even if it was saved by an older version: it is skipped with a `REFUSED (system root)` ERROR in the log, and the Actions tab marks it with a red **REFUSED at trigger** tag.
 
 Saving asks for confirmation first when:
 
-- a newly added deletion path removes an entire array or pool (`/mnt/user`, `/mnt/user0`, `/mnt/cache`, `/mnt/diskN` or any other `/mnt/<name>`). These paths still run at trigger time; the Actions tab marks them with an orange **whole array/pool** tag. Paths you already confirmed do not ask again.
+- a newly added deletion path removes an entire array or pool (`/mnt/user`, `/mnt/user0`, `/mnt/cache`, `/mnt/diskN` or any other `/mnt/<name>`), including a glob pattern directly under one, such as `/mnt/user/*` or `/mnt/*`. A pattern inside a share, such as `/mnt/user/Media/*`, does not ask. These paths still run at trigger time; the Actions tab marks them with an orange **whole array/pool** tag. Paths you already confirmed do not ask again.
 - the switch is armed and you shorten the check-in interval or grace period so that the deadline lands before the next cron check. The prompt says what the next check will do (count a missed check-in, enter the grace period, or trigger). Check in first, or confirm to save anyway.
 
 The **Dry Test** button on the Actions tab lists every file and folder each glob pattern currently matches (the first 20, plus a count of the rest) and tags system-root paths as refused and whole-array or pool paths as dangerous.
@@ -276,7 +277,7 @@ Tap the button, confirm, and it hits the check-in endpoint and resets your timer
 7. With double-miss enabled, the first miss sends a warning and resets the timer. If the warning cannot be delivered, it is retried until the grace period ends; then the timer resets anyway and an ERROR is logged, so a broken webhook cannot stall the switch. If the flash drive cannot be written, the first miss cannot be recorded: the switch stays parked and will **not** trigger until the flash drive is writable, and it says so (ERROR in the log and syslog, a webhook alert once per boot)
 8. The API server self-heals — if the process dies, the cron job restarts it
 9. Failures are loud:
-   - a failing cron evaluator, an unreadable state or config file, or a restore from backup alerts once per boot by webhook when PHP still runs, and always logs to syslog
+   - a failing cron evaluator, an unreadable state or config file, an unparseable last check-in, or a restore from backup alerts once per boot by webhook when PHP still runs, and always logs to syslog
    - a missing `config.json` or `state.json` (e.g. an unmounted flash drive) is logged to syslog on every cron check
    - Uptime Kuma reports **down** when the state or config file is unreadable and after a restore from backup, and its message says since when notifications have been failing
    - every failed action in the web UI shows an error toast
@@ -288,18 +289,17 @@ Settings and state live on the flash drive in `/boot/config/plugins/deadman-swit
 - `config.json`, `state.json` — settings and switch state (deleting `config.json` resets all settings to defaults)
 - `config.json.bak`, `state.json.bak` — copy of the last good version of each, refreshed when a meaningful setting or state value changes. If `state.json` or `config.json` is found corrupt it is restored from its `.bak` and the switch is **DISARMED** as a precaution (see Troubleshooting)
 - `config.json.corrupt`, `state.json.corrupt` — the corrupt bytes, kept when a file was restored from its `.bak`
-
 - `deadman-switch.cron` — the cron schedule (see [Uninstall and reinstall](#uninstall-and-reinstall))
-- `.removed` — left behind when the plugin is uninstalled, and removed by the next install (see below)
+- `.removed` — left behind when the plugin is uninstalled, and removed by the next install once it has checked the switch (see below)
 
 Per-boot runtime files live in RAM in `/var/run/deadman-switch/`: the API server PID file (`api-server.pid`, moved off the flash drive), `alert.*` markers that limit failure alerts to once per boot, and the `triggered` marker that stops trigger actions running twice in one boot.
 
 ### Uninstall and reinstall
 
 - **Cron schedule:** every install and every boot runs the plugin's install script, which writes `deadman-switch.cron` from the saved cron check interval using the same code that the Settings tab uses when you change the interval. The file is only rewritten when the schedule actually changed.
-- **Uninstall:** removing the plugin stops the API server, removes the cron schedule and keeps your settings and state in `/boot/config/plugins/deadman-switch/`. If the switch is still armed, the removal output says so with a NOTE: on reinstall it resumes, unless its deadline has passed in the meantime. Delete that directory for a clean removal.
-- **Reinstall:** if the switch was armed and its deadline plus grace period passed while the plugin was uninstalled, the reinstall **DISARMS** it instead of letting the first cron check trigger the actions. The install output shows a NOTICE and an ERROR is logged; review Settings and the Actions tab, then re-arm. If the deadline has not passed yet, the switch stays armed (a WARN is logged).
-- A normal reboot never disarms the switch, even if the deadline passed while the server was off: that only happens after an explicit uninstall and reinstall.
+- **Uninstall:** removing the plugin stops the API server, removes the cron schedule and keeps your settings and state in `/boot/config/plugins/deadman-switch/`. If the switch is still armed, the removal output says so with a NOTE: on reinstall it resumes, unless its deadline plus grace period has passed in the meantime. Delete that directory for a clean removal.
+- **Reinstall:** if the switch was armed and its deadline plus grace period passed while the plugin was uninstalled, the reinstall **DISARMS** it instead of letting the first cron check trigger the actions. The install output shows a NOTICE and an ERROR is logged; review Settings and the Actions tab, then re-arm. If the deadline plus grace period has not passed yet, the switch stays armed (a WARN is logged). If `state.json` or `config.json` cannot be read at that moment, or the disarm cannot be written to the flash drive, an ERROR is logged and the `.removed` marker is kept, so the check runs again at the next install or boot.
+- A normal reboot never disarms the switch, even if the deadline passed while the server was off: that only happens after an explicit uninstall and reinstall (or at the first boot after one whose check had to be postponed, as described above).
 
 ## Troubleshooting
 
@@ -344,17 +344,17 @@ If the flash drive cannot be written, the log shows `Failed to write cron schedu
 
 ### "Notifications have been failing since ..." banner
 
-This orange banner on the Settings page appears when a notification could not be delivered on any enabled channel, and shows when the failures started. The Uptime Kuma message mentions it too. It disappears by itself as soon as a notification is delivered on at least one channel again. Check the webhook URLs on the Notifications tab and use the **Test** buttons.
+This orange banner at the top of the Dashboard tab appears when a notification could not be delivered on any enabled channel, and shows when the failures started. The Uptime Kuma message mentions it too. It disappears by itself as soon as a notification is delivered on at least one channel again. Check the webhook URLs on the Notifications tab and use the **Test** buttons.
 
 ### Switch disarmed after a restore, or "state.json is unreadable"
 
-If `state.json` on the flash drive is found corrupt, it is restored from `state.json.bak` and the switch is **DISARMED** as a precaution — the backup may be older than your last check-in. An orange "State or settings were restored from a backup ... and the switch was DISARMED" banner on the Settings page and a webhook alert (once per boot) tell you when this happens. Check the **Last Check-in** time on the Dashboard tab, then re-arm the switch. The banner disappears when you arm, disarm or check in.
+If `state.json` on the flash drive is found corrupt, it is restored from `state.json.bak` and the switch is **DISARMED** as a precaution — the backup may be older than your last check-in. An orange "State or settings were restored from a backup ... and the switch was DISARMED" banner at the top of the Dashboard tab and a webhook alert (once per boot) tell you when this happens. Check the **Last Check-in** time on the Dashboard tab, then re-arm the switch. The banner disappears when you arm or disarm.
 
 A corrupt `config.json` with a usable `config.json.bak` is handled the same way: the settings are restored and the switch is **DISARMED**. The restored actions list may predate your last save, so review the Settings and Actions tabs, then re-arm. (If the switch cannot be disarmed because the flash drive cannot be written, the restore is not applied and the switch is not evaluated until the flash drive is writable.)
 
 In both cases the corrupt original is kept next to it as `state.json.corrupt` or `config.json.corrupt`.
 
-If there is no usable `.bak`, the switch refuses to write anything (so the evidence is not overwritten with defaults), stops evaluating the countdown, and shows a red banner on the Settings page. Repair or delete the corrupt file in `/boot/config/plugins/deadman-switch/` and reload the page (deleting `config.json` resets all settings to defaults).
+If there is no usable `.bak`, the switch refuses to write anything (so the evidence is not overwritten with defaults), stops evaluating the countdown, and shows a red banner at the top of the Dashboard tab. Repair or delete the corrupt file in `/boot/config/plugins/deadman-switch/` and reload the page (deleting `config.json` resets all settings to defaults).
 
 ### Actions not triggering (or triggering unexpectedly)
 
@@ -362,12 +362,12 @@ If there is no usable `.bak`, the switch refuses to write anything (so the evide
 - Use the **Dry Test** button on the Actions tab to preview what would happen
 - Glob patterns (`*`) do not match dotfiles/dotfolders — this is intentional for safety
 - Check the Logs tab for trigger execution details
-- A log line `REFUSED (system root): <path>` (ERROR) means a deletion path, or one of its glob matches, is a system root such as `/boot` or `/mnt`. It was skipped and nothing under it was deleted. The Actions tab marks such a path with a red **REFUSED at trigger** tag; change it to the folder you actually want deleted (see [Settings validation](#settings-validation))
+- A log line `REFUSED (system root): <path>` (ERROR) means a deletion path, one of its glob matches, or the folder a glob pattern sits directly in, is a system root such as `/boot` or `/mnt`; a `(matches ...)` suffix names the match or symlink responsible. It was skipped and nothing under it was deleted. The Actions tab marks such a path with a red **REFUSED at trigger** tag; change it to the folder you actually want deleted (see [Settings validation](#settings-validation))
 - If the switch was disarmed right after a reinstall, see [Uninstall and reinstall](#uninstall-and-reinstall)
 
 ### Failure alerts arrive only once
 
-Failure alerts (unreadable state or config, restore from backup, cron check failing, flash drive not writable for double-miss, wrong External API URL) are sent by webhook once per boot, so a lasting problem does not flood you. Each sent alert leaves a marker file `/var/run/deadman-switch/alert.<name>` in RAM; the markers are cleared on reboot. To get an alert again without rebooting, delete its marker (for the External API URL check, also delete `/var/run/deadman-switch/probe.external-url`, which makes the next cron check test the URL again). Check the Logs tab for the details of each problem.
+Failure alerts (unreadable state or config, unparseable last check-in, restore from backup, cron check failing, flash drive not writable for double-miss, wrong External API URL) are sent by webhook once per boot, so a lasting problem does not flood you. Each sent alert leaves a marker file `/var/run/deadman-switch/alert.<name>` in RAM; the markers are cleared on reboot. To get an alert again without rebooting, delete its marker (for the External API URL check, also delete `/var/run/deadman-switch/probe.external-url`, which makes the next cron check test the URL again). Check the Logs tab for the details of each problem.
 
 ### Quick check-in link not working
 

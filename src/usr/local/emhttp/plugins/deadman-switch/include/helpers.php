@@ -161,8 +161,10 @@ function dms_validate_config(array $c): array {
     }
     foreach ($c['actions']['deletions'] ?? [] as $d) {
         $p = is_array($d) ? (string)($d['path'] ?? '') : '';
-        if ($p !== '' && dms_classify_deletion_path($p) === 'forbidden') {
-            $errors[] = "Refusing to delete a system root: $p";
+        if ($p === '') continue;
+        $r = dms_classify_deletion_path_detail($p);
+        if ($r['class'] === 'forbidden') {
+            $errors[] = "Refusing to delete a system root: $p" . ($r['via'] !== null ? " (matches {$r['via']})" : '');
         }
     }
     return $errors;
@@ -170,33 +172,62 @@ function dms_validate_config(array $c): array {
 
 // 'ok' | 'array_root' (a whole array/pool: allowed, confirmed on save) |
 // 'forbidden' (a system root: refused on save and at trigger time).
-// Classifies the literal path AND every current glob() match (the same glob
-// trigger.sh expands) and returns the most severe.
-function dms_classify_deletion_path($path) {
+function dms_classify_deletion_path($path, $expand = true) {
+    return dms_classify_deletion_path_detail($path, $expand)['class'];
+}
+
+// ['class' => as above, 'via' => what caused it, or null when it is the path
+// itself]. Classifies the literal path, a glob's parent directory (a glob
+// directly under a system root empties that root: forbidden; directly under
+// /mnt or a /mnt/<name> array or pool: array_root) and, when $expand, every
+// current glob() match (the same glob trigger.sh expands); the most severe
+// wins. 'via' names the symlink or match so the user knows which entry to fix.
+function dms_classify_deletion_path_detail($path, $expand = true) {
     $forbidden = ['/', '/boot', '/mnt', '/usr', '/etc', '/bin', '/sbin', '/lib', '/lib64', '/var',
                   '/proc', '/sys', '/dev', '/run', '/root', '/home', '/tmp', '/usr/local/emhttp'];
     $array_roots = ['/mnt/user', '/mnt/user0', '/mnt/cache', '/mnt/disks', '/mnt/remotes', '/mnt/addons'];
+    // [class, normalized path, resolved path]
     $one = function($p) use ($forbidden, $array_roots) {
         $n = preg_replace('#/+#', '/', (string)$p);
         if ($n !== '/') $n = rtrim($n, '/');
-        if ($n === '') return 'ok';
+        if ($n === '') return ['ok', $n, $n];
         $real = @realpath($n);
-        if ($real !== false) $n = $real;
-        if (in_array($n, $forbidden, true)) return 'forbidden';
+        $r = $real !== false ? $real : $n;
+        if (in_array($r, $forbidden, true)) return ['forbidden', $n, $r];
         // Any direct child of /mnt (user, user0, cache, diskN, pools, disks, ...)
-        if (in_array($n, $array_roots, true) || preg_match('#^/mnt/disk[0-9]+$#', $n) || preg_match('#^/mnt/[^/]+$#', $n)) return 'array_root';
-        return 'ok';
+        if (in_array($r, $array_roots, true) || preg_match('#^/mnt/disk[0-9]+$#', $r) || preg_match('#^/mnt/[^/]+$#', $r)) return ['array_root', $n, $r];
+        return ['ok', $n, $r];
     };
+    $describe = function($n, $r) { return $n === $r ? $n : "$n -> $r"; };
     $path = (string)$path;
-    if (trim($path) === '') return 'ok';
+    if (trim($path) === '') return ['class' => 'ok', 'via' => null];
     $rank = ['ok' => 0, 'array_root' => 1, 'forbidden' => 2];
-    $worst = $one($path);
-    foreach (glob($path) ?: [] as $m) {
-        if ($worst === 'forbidden') break;
-        $k = $one($m);
-        if ($rank[$k] > $rank[$worst]) $worst = $k;
+
+    [$worst, $n, $r] = $one($path);
+    $via = $n === $r ? null : $describe($n, $r);
+
+    // A literal path (no glob metacharacters) such as /boot/config stays ok
+    if (strpbrk($path, '*?[') !== false) {
+        $parent = dirname(preg_replace('#/+#', '/', rtrim($path, '/')) ?: '/');
+        [$pk, $pn, $pr] = $one($parent);
+        if ($pr === '/mnt') $pk = 'array_root';   // /mnt/* = every array and pool, confirmed like /mnt/user
+        if ($rank[$pk] > $rank[$worst]) {
+            $worst = $pk;
+            $via = 'parent directory ' . $describe($pn, $pr);
+        }
     }
-    return $worst;
+
+    if ($expand) {
+        foreach (glob($path) ?: [] as $m) {
+            if ($worst === 'forbidden') break;
+            [$k, $mn, $mr] = $one($m);
+            if ($rank[$k] > $rank[$worst]) {
+                $worst = $k;
+                $via = $describe($mn, $mr);
+            }
+        }
+    }
+    return ['class' => $worst, 'via' => $via];
 }
 
 // Configured deletion paths that delete an entire array or pool
@@ -235,6 +266,15 @@ function dms_load_config() {
     $config = array_replace_recursive($defaults, $data);
 
     if ($status === 'recovered') {
+        // Called from inside a dms_update_state() closure: the disarm below
+        // would block on our own state lock. Park loudly, write nothing; the
+        // next plain load performs the restore.
+        if (!empty($GLOBALS['dms_in_state_lock'])) {
+            $msg = 'config.json restore pending (called while the state lock is held)';
+            $GLOBALS['dms_load_error']['config'] = $msg;
+            dms_log($msg, 'ERROR');
+            return dms_sanitize_config($config);
+        }
         // The .bak lags one save behind, so its actions list may predate the
         // last save: DISARM exactly like a state restore. The disarm is
         // persisted BEFORE config.json is rewritten, so until it has reached
@@ -314,33 +354,37 @@ function dms_write_json_atomic($file, $data, $backup_keys = null) {
 // Serialized read-modify-write. $fn receives the current state and returns the
 // modified state. Uses a separate lock file because the data file is replaced
 // by rename() and a lock on a replaced inode would not serialize writers.
+// $GLOBALS['dms_in_state_lock'] is true for the whole call (reset on every
+// exit) so dms_load_config() never disarms, i.e. re-locks, from inside $fn.
 function dms_update_state($fn) {
-    dms_ensure_dirs();
-    $lock = @fopen(DMS_STATE_FILE . '.lock', 'c');
-    if ($lock) flock($lock, LOCK_EX);
-    $state = dms_load_state();
-    // Checked inside the lock, after the load: never overwrite an unreadable
-    // state.json with defaults (that would silently disarm the switch)
-    if (dms_state_load_error() !== null) {
+    $GLOBALS['dms_in_state_lock'] = true;
+    $lock = false;
+    try {
+        dms_ensure_dirs();
+        $lock = @fopen(DMS_STATE_FILE . '.lock', 'c');
+        if ($lock) flock($lock, LOCK_EX);
+        $state = dms_load_state();
+        // Checked inside the lock, after the load: never overwrite an unreadable
+        // state.json with defaults (that would silently disarm the switch)
+        if (dms_state_load_error() !== null) {
+            dms_log('Refusing to overwrite unreadable state.json', 'ERROR');
+            return false;
+        }
+        $result = $fn($state);
+        if (is_array($result)) $state = $result;
+        // .bak only on a semantic change: token mints, notification levels and
+        // failure markers must not churn the backup of the last good state
+        $ok = dms_write_json_atomic(DMS_STATE_FILE, $state,
+            ['armed', 'triggered', 'trigger_time', 'paused', 'pause_start', 'pause_expires', 'last_checkin', 'grace_period_start', 'missed_count']);
+        if (!$ok) dms_log('Failed to write state file (flash full or read-only?)', 'ERROR');
+        return $ok ? $state : false;
+    } finally {
         if ($lock) {
             flock($lock, LOCK_UN);
             fclose($lock);
         }
-        dms_log('Refusing to overwrite unreadable state.json', 'ERROR');
-        return false;
+        $GLOBALS['dms_in_state_lock'] = false;
     }
-    $result = $fn($state);
-    if (is_array($result)) $state = $result;
-    // .bak only on a semantic change: token mints, notification levels and
-    // failure markers must not churn the backup of the last good state
-    $ok = dms_write_json_atomic(DMS_STATE_FILE, $state,
-        ['armed', 'triggered', 'trigger_time', 'paused', 'pause_start', 'pause_expires', 'last_checkin', 'grace_period_start', 'missed_count']);
-    if ($lock) {
-        flock($lock, LOCK_UN);
-        fclose($lock);
-    }
-    if (!$ok) dms_log('Failed to write state file (flash full or read-only?)', 'ERROR');
-    return $ok ? $state : false;
 }
 
 function dms_update_config($fn) {
@@ -911,7 +955,10 @@ function dms_send_webhook($type, $webhook_config, $message, $config = null, $sta
                     $body = dms_render_template($tpl, $config, $state, $opts + ['message' => $message, 'escape' => 'json']);
                     if (preg_match('/^\s*[\[{]/', $tpl) && json_decode($body) === null) dms_log('Custom webhook body is not valid JSON after rendering', 'WARN');
                 } else {
-                    $body = $tpl !== '' ? $tpl : $message;
+                    // No state to fill the placeholders from (missing or
+                    // unreadable state.json): send the message text itself
+                    // rather than a template with unfilled or wrong values
+                    $body = $message;
                 }
                 curl_setopt($ch, CURLOPT_POST, true);
                 curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
@@ -956,29 +1003,42 @@ function dms_test_webhook($config, $type) {
 
 // Plain-text message to every enabled webhook (no retries); records the
 // outcome in state as last_notify_failure. Discord gets plain text; a custom
-// POST body template is rendered with {{message}} = $msg. A missing state.json
-// is not loaded (loading would recreate it as a fresh, disarmed one).
+// POST body template is rendered with {{message}} = $msg.
+// $state: null = load it here; false = the caller knows state.json is missing
+// or unreadable: do not load it (a missing one would be recreated as a fresh,
+// disarmed one; a corrupt one would be logged again) and send the raw message
+// on every channel (custom body = the message text). A missing or unreadable
+// state.json found here is treated the same way. The outcome is still recorded
+// when state.json turns out to be cleanly readable.
 function dms_broadcast_plain($config, $msg, $state = null) {
-    if ($state === null && file_exists(DMS_STATE_FILE)) $state = dms_load_state();
+    if ($state === null && file_exists(DMS_STATE_FILE)) {
+        $state = dms_load_state();
+        if (dms_state_load_error() !== null) $state = false;   // never render defaults as DISARMED
+    }
+    if (!is_array($state)) $state = false;
     $enabled = 0;
     $sent = 0;
     foreach (($config['webhooks'] ?? []) as $type => $wh) {
         if (empty($wh['enabled'])) continue;
         $enabled++;
-        $r = dms_send_webhook($type, $wh, $msg, $config, $state, ['plain' => true]);
+        $r = dms_send_webhook($type, $wh, $msg, $config, $state ?: null, ['plain' => true]);
         if ($r['success']) $sent++;
         else dms_log("Plain broadcast via $type failed: {$r['message']}", 'WARN');
     }
-    dms_record_notify_outcome($enabled, $sent);
+    // Record the outcome only from a cleanly readable state.json: peeking with
+    // dms_load_json_file() logs nothing and never restores or recreates it
+    if ($state !== false || dms_load_json_file(DMS_STATE_FILE)[1] === 'ok') dms_record_notify_outcome($enabled, $sent);
     return ['enabled' => $enabled, 'sent' => $sent];
 }
 
 // last_notify_failure: the time of the FIRST failure in the current run of
 // failures (every channel failed), cleared on any success. Written only on a
 // transition, so a webhook outage costs no flash write per cron cycle.
-// Skipped when state.json is unreadable (the locked writer would refuse anyway)
+// Skipped when state.json is missing (loading would recreate it as a fresh,
+// disarmed one) or unreadable (the locked writer would refuse anyway)
 function dms_record_notify_outcome($enabled, $sent) {
     if ($enabled === 0) return;
+    if (!file_exists(DMS_STATE_FILE)) return;
     $cur = dms_load_state();
     if (dms_state_load_error() !== null) return;
     if (($sent > 0) === ($cur['last_notify_failure'] === null)) return;   // no transition
@@ -1100,6 +1160,7 @@ function dms_execute_dry_run($config) {
         $method = $deletion['method'] ?? 'standard';
         $matches = glob($path) ?: [];
         $exists = file_exists($path) || $matches;
+        $danger = dms_classify_deletion_path_detail($path);
         $results[] = [
             'type'        => 'deletion',
             'path'        => $path,
@@ -1108,7 +1169,8 @@ function dms_execute_dry_run($config) {
             'action'      => "Would delete: $path (method: $method)",
             'matches'     => array_slice($matches, 0, 20),
             'match_count' => count($matches),
-            'danger'      => dms_classify_deletion_path($path),
+            'danger'      => $danger['class'],
+            'danger_via'  => $danger['via'],
         ];
     }
 

@@ -152,8 +152,10 @@ switch ($action) {
             echo json_encode(['success' => false, 'message' => $state['triggered'] ? 'Switch has triggered' : 'Switch is not armed']);
             break;
         }
-        $state = dms_update_state(function($s) use ($hours) {
+        $extended = false;
+        $state = dms_update_state(function($s) use ($hours, &$extended) {
             $now = time();
+            $extended = false;
             if (!empty($s['paused'])) {
                 $exp = dms_parse_time($s['pause_expires'] ?? null);
                 if ($exp === null || $exp >= $now) {
@@ -161,6 +163,7 @@ switch ($action) {
                     // missing pause_start would accrue no credit: start it now
                     if (dms_parse_time($s['pause_start'] ?? null) === null) $s['pause_start'] = date('c', $now);
                     $s['pause_expires'] = date('c', $now + $hours * 3600);
+                    $extended = true;
                     return $s;
                 }
                 // Expired but cron has not run yet: credit up to the old expiry, start fresh
@@ -176,7 +179,7 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => 'Failed to write state file']);
             break;
         }
-        dms_log("Timer PAUSED for $hours hours");
+        dms_log($extended ? "Pause extended to $hours hours from now" : "Timer PAUSED for $hours hours");
         echo json_encode(['success' => true, 'pause_expires' => $state['pause_expires'] ?? null]);
         break;
 
@@ -195,7 +198,7 @@ switch ($action) {
             echo json_encode(['success' => false, 'error' => 'Failed to write state file']);
             break;
         }
-        dms_log("Timer UNPAUSED (deadline extended by pause duration)");
+        dms_log("Timer UNPAUSED (remaining time preserved)");
         echo json_encode(['success' => true]);
         break;
 

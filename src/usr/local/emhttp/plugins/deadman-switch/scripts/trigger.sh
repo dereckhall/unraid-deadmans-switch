@@ -69,14 +69,23 @@ $failures = 0;
 
 foreach ($config['actions']['deletions'] ?? [] as $del) {
     $method = $del['method'] ?? 'standard';
+    // A glob directly under a system root (e.g. /boot/*) would empty that
+    // root one match at a time: refuse the whole entry before expanding it
+    $pre = dms_classify_deletion_path_detail((string)($del['path'] ?? ''), false);
+    if ($pre['class'] === 'forbidden') {
+        dms_log("REFUSED (system root): {$del['path']}" . ($pre['via'] !== null ? " (matches {$pre['via']})" : ''), 'ERROR');
+        $failures++;
+        continue;
+    }
     $matches = glob($del['path']);
     if (empty($matches)) $matches = [$del['path']];
 
     foreach ($matches as $path) {
         // A system root is never deleted, even from a config saved before
         // save-time validation existed. Whole-array paths run as configured.
-        if (dms_classify_deletion_path($path) === 'forbidden') {
-            dms_log("REFUSED (system root): $path", 'ERROR');
+        $cls = dms_classify_deletion_path_detail($path);
+        if ($cls['class'] === 'forbidden') {
+            dms_log("REFUSED (system root): $path" . ($cls['via'] !== null ? " (matches {$cls['via']})" : ''), 'ERROR');
             $failures++;
             continue;
         }

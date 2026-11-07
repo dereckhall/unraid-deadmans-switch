@@ -39,13 +39,16 @@ api_pid_is_ours "$API_PID" || "$SCRIPT_DIR/start-api.sh" 2>/dev/null
 # Per-boot RAM markers (alert once-ness, trigger.sh's 'triggered' marker);
 # RUN_DIR comes from api-common.sh
 mkdir -p "$RUN_DIR"
-alert_once() {   # <name> <message>: broadcast once per boot (RAM marker)
+alert_once() {   # <name> <message> [nostate]: broadcast once per boot (RAM marker)
     local marker="$RUN_DIR/alert.$1"; [ -e "$marker" ] && return 0
     # With an unreadable config, zero enabled webhooks is not success: the
-    # alert is retried each cycle (syslog + Kuma down are the floor)
+    # alert is retried each cycle (syslog + Kuma down are the floor).
+    # nostate: state.json is known to be unreadable or untrustworthy here, so
+    # it is not loaded and every channel gets the raw message text
     if php -r 'require_once "/usr/local/emhttp/plugins/deadman-switch/include/helpers.php";
-        $cfg = dms_load_config(); $r = dms_broadcast_plain($cfg, $argv[1]);
-        exit(($r["sent"] > 0 || ($r["enabled"] === 0 && dms_config_load_error() === null)) ? 0 : 1);' -- "$2" 2>/dev/null; then touch "$marker"; fi
+        $cfg = dms_load_config();
+        $r = dms_broadcast_plain($cfg, $argv[1], ($argv[2] ?? "") === "nostate" ? false : null);
+        exit(($r["sent"] > 0 || ($r["enabled"] === 0 && dms_config_load_error() === null)) ? 0 : 1);' -- "$2" "${3:-}" 2>/dev/null; then touch "$marker"; fi
 }
 
 # Not silent: syslog always, the flash log if it is writable. No webhook alert
@@ -69,7 +72,7 @@ if [ ! -e "$RUN_DIR/probe.external-url" ]; then
         $u = trim((string)($c["external_url"] ?? ""));
         if ($u === "") { echo "none"; exit; }
         $code = 0; $r = dms_probe_external_url($u, $code);
-        echo $r, " ", $code, " ", $u;' 2>/dev/null)
+        echo $r, " ", $code, " ", $u;' 2>/dev/null | tail -n 1)
     read -r PROBE_RESULT PROBE_CODE PROBE_URL <<< "$PROBE"
     case "$PROBE_RESULT" in
         ok|none)
@@ -118,7 +121,6 @@ RESULT=$(php -r "
     // an unparseable last_checkin would give a null deadline (null <= 0 and
     // time() >= null both hold in PHP, i.e. a wrong TRIGGER)
     if (dms_state_load_error() !== null || dms_config_load_error() !== null) { echo 'STATUS:state_unreadable'; exit; }
-    if (\$state['last_checkin'] !== null && dms_parse_time(\$state['last_checkin']) === null) { echo 'STATUS:state_invalid'; exit; }
 
     // A .bak restore (which also disarms) is reported before the armed check;
     // epoch first because the ISO last_checkin contains colons
@@ -129,6 +131,10 @@ RESULT=$(php -r "
         echo 'STATUS:disarmed';
         exit;
     }
+
+    // After the armed check: a disarmed switch cannot trigger, so a garbage
+    // last_checkin there is not an error every cycle (arming rewrites it)
+    if (\$state['last_checkin'] !== null && dms_parse_time(\$state['last_checkin']) === null) { echo 'STATUS:state_invalid'; exit; }
 
     // Check if already triggered
     if (\$state['triggered']) {
@@ -211,6 +217,7 @@ RESULT=$(php -r "
                 // first miss (missed_count 1 on disk) still reaches the
                 // trigger path on the second miss
                 \$state['missed_count'] = intval(\$state['missed_count'] ?? 0) + 1;
+                dms_log('Flash write failed; counting this missed deadline (#' . \$state['missed_count'] . ') in memory for this run', 'WARN');
             }
         }
 
@@ -311,15 +318,18 @@ while IFS= read -r line; do
             case "$DETAIL" in
                 state_unreadable)
                     log "state.json/config.json unreadable — the switch is NOT being evaluated" ERROR
-                    alert_once state-unreadable "Dead Man's Switch on $HN: state.json or config.json on the flash drive is unreadable. The switch is not being evaluated until it is repaired (see Settings > Dead Man's Switch)."
+                    alert_once state-unreadable "Dead Man's Switch on $HN: state.json or config.json on the flash drive is unreadable. The switch is not being evaluated until it is repaired (see Settings > Dead Man's Switch)." nostate
                     ;;
                 state_invalid)
                     log "last_checkin is not a parseable timestamp — the switch is NOT being evaluated" ERROR
-                    alert_once state-invalid "Dead Man's Switch on $HN: state.json holds an unparseable last_checkin. Check in, or disarm and re-arm, to repair it."
+                    alert_once state-invalid "Dead Man's Switch on $HN: state.json holds an unparseable last_checkin. Check in, or disarm and re-arm, to repair it." nostate
                     ;;
                 double_miss_reset_failed)
                     log "Double-miss first-miss reset could not be written to the flash drive — the switch is parked and will NOT trigger" ERROR
-                    alert_once double-miss-reset-failed "Dead Man's Switch on $HN: the flash drive cannot be written, so the first missed check-in could not be recorded. Double-miss protection cannot be honored and the switch will NOT trigger until the flash drive is writable. Check the server."
+                    alert_once double-miss-reset-failed "Dead Man's Switch on $HN: the flash drive cannot be written, so the missed check-in or the timer reset could not be recorded. Double-miss protection cannot be honored and the switch will NOT trigger until the flash drive is writable. Check the server." nostate
+                    ;;
+                clock_anomaly)
+                    log "System clock is behind the last check-in - the switch is NOT being evaluated until the clock is corrected" ERROR
                     ;;
                 *)
                     log "Cron check: $DETAIL"
@@ -333,11 +343,11 @@ while IFS= read -r line; do
             REC_AT=$(date -d @"$REC_EPOCH" '+%Y-%m-%d %H:%M:%S' 2>/dev/null) || REC_AT="$REC_EPOCH"
             [ -n "$REC_AT" ] || REC_AT="$REC_EPOCH"
             log "State or settings were restored from a backup at $REC_AT and the switch was DISARMED as a precaution. last_checkin is now $REC_CHECKIN — verify Last Check-in and the Actions tab, then re-arm in Settings" ERROR
-            alert_once state-recovered "Dead Man's Switch on $HN: state or settings were restored from a backup at $REC_AT and the switch was DISARMED as a precaution. Last check-in is now $REC_CHECKIN. Verify Last Check-in and the Actions tab in Settings > Dead Man's Switch, then re-arm the switch."
+            alert_once state-recovered "Dead Man's Switch on $HN: state or settings were restored from a backup at $REC_AT and the switch was DISARMED as a precaution. Last check-in is now $REC_CHECKIN. Verify Last Check-in and the Actions tab in Settings > Dead Man's Switch, then re-arm the switch." nostate
             ;;
         UNPAUSE)
             SEEN=1
-            log "Pause expired, timer automatically resumed (deadline extended by pause duration)"
+            log "Pause expired, timer automatically resumed (remaining time preserved)"
             ;;
         NOTIFY)
             SEEN=1
@@ -370,7 +380,7 @@ done <<< "$RESULT"
 
 if [ "$RC" -ne 0 ] || [ "$SEEN" -eq 0 ]; then
     log "Evaluator failed (exit $RC) — the switch is NOT being evaluated" ERROR
-    alert_once evaluator-failed "Dead Man's Switch: the cron evaluator is failing on $HN (exit $RC). The switch is not being evaluated until this is fixed. See Settings > Dead Man's Switch > Logs."
+    alert_once evaluator-failed "Dead Man's Switch: the cron evaluator is failing on $HN (exit $RC). The switch is not being evaluated until this is fixed. See Settings > Dead Man's Switch > Logs." nostate
 else
     rm -f "$RUN_DIR/alert.evaluator-failed"
 fi

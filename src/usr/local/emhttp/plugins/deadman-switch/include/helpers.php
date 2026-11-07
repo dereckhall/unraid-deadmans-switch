@@ -141,6 +141,74 @@ function dms_sanitize_config(array $c): array {
     return $c;
 }
 
+// Rules a saved config must satisfy (run on the sanitized, merged config).
+// [] when valid, else one human-readable error per broken rule.
+function dms_validate_config(array $c): array {
+    $errors = [];
+    $t = $c['warning_thresholds'] ?? [];
+    $order = ['reminder', 'warning', 'critical', 'last_chance'];
+    for ($i = 0; $i < count($order) - 1; $i++) {
+        if (intval($t[$order[$i]] ?? 0) >= intval($t[$order[$i + 1]] ?? 0)) {
+            $errors[] = 'Warning thresholds must increase: reminder < warning < critical < last chance (now ' .
+                implode(' / ', array_map(function($k) use ($t) { return intval($t[$k] ?? 0) . '%'; }, $order)) . ')';
+            break;
+        }
+    }
+    $grace = intval($c['grace_period_hours'] ?? 0);
+    $cron = intval($c['cron_interval_minutes'] ?? 0);
+    if ($grace * 60 < $cron) {
+        $errors[] = "Grace period ({$grace}h) must be at least as long as the cron check interval ($cron min), otherwise the grace notification can never be sent";
+    }
+    foreach ($c['actions']['deletions'] ?? [] as $d) {
+        $p = is_array($d) ? (string)($d['path'] ?? '') : '';
+        if ($p !== '' && dms_classify_deletion_path($p) === 'forbidden') {
+            $errors[] = "Refusing to delete a system root: $p";
+        }
+    }
+    return $errors;
+}
+
+// 'ok' | 'array_root' (a whole array/pool: allowed, confirmed on save) |
+// 'forbidden' (a system root: refused on save and at trigger time).
+// Classifies the literal path AND every current glob() match (the same glob
+// trigger.sh expands) and returns the most severe.
+function dms_classify_deletion_path($path) {
+    $forbidden = ['/', '/boot', '/mnt', '/usr', '/etc', '/bin', '/sbin', '/lib', '/lib64', '/var',
+                  '/proc', '/sys', '/dev', '/run', '/root', '/home', '/tmp', '/usr/local/emhttp'];
+    $array_roots = ['/mnt/user', '/mnt/user0', '/mnt/cache', '/mnt/disks', '/mnt/remotes', '/mnt/addons'];
+    $one = function($p) use ($forbidden, $array_roots) {
+        $n = preg_replace('#/+#', '/', (string)$p);
+        if ($n !== '/') $n = rtrim($n, '/');
+        if ($n === '') return 'ok';
+        $real = @realpath($n);
+        if ($real !== false) $n = $real;
+        if (in_array($n, $forbidden, true)) return 'forbidden';
+        // Any direct child of /mnt (user, user0, cache, diskN, pools, disks, ...)
+        if (in_array($n, $array_roots, true) || preg_match('#^/mnt/disk[0-9]+$#', $n) || preg_match('#^/mnt/[^/]+$#', $n)) return 'array_root';
+        return 'ok';
+    };
+    $path = (string)$path;
+    if (trim($path) === '') return 'ok';
+    $rank = ['ok' => 0, 'array_root' => 1, 'forbidden' => 2];
+    $worst = $one($path);
+    foreach (glob($path) ?: [] as $m) {
+        if ($worst === 'forbidden') break;
+        $k = $one($m);
+        if ($rank[$k] > $rank[$worst]) $worst = $k;
+    }
+    return $worst;
+}
+
+// Configured deletion paths that delete an entire array or pool
+function dms_has_array_root_paths(array $c): array {
+    $out = [];
+    foreach ($c['actions']['deletions'] ?? [] as $d) {
+        $p = is_array($d) ? (string)($d['path'] ?? '') : '';
+        if ($p !== '' && dms_classify_deletion_path($p) === 'array_root') $out[] = $p;
+    }
+    return array_values(array_unique($out));
+}
+
 function dms_load_config() {
     static $corrupt_logged = false;
     dms_ensure_dirs();
@@ -1023,13 +1091,17 @@ function dms_execute_dry_run($config) {
     foreach ($config['actions']['deletions'] as $deletion) {
         $path = $deletion['path'];
         $method = $deletion['method'] ?? 'standard';
-        $exists = file_exists($path) || glob($path);
+        $matches = glob($path) ?: [];
+        $exists = file_exists($path) || $matches;
         $results[] = [
-            'type'   => 'deletion',
-            'path'   => $path,
-            'method' => $method,
-            'exists' => (bool)$exists,
-            'action' => "Would delete: $path (method: $method)",
+            'type'        => 'deletion',
+            'path'        => $path,
+            'method'      => $method,
+            'exists'      => (bool)$exists,
+            'action'      => "Would delete: $path (method: $method)",
+            'matches'     => array_slice($matches, 0, 20),
+            'match_count' => count($matches),
+            'danger'      => dms_classify_deletion_path($path),
         ];
     }
 

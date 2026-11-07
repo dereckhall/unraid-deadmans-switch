@@ -200,12 +200,31 @@ function dmsGenerateApiKey() {
     });
 }
 
+// POST a save_config. The server may answer needs_confirm ('dangerous' for a
+// whole-array/pool deletion path, 'shorten' when a shorter interval or grace
+// puts the deadline before the next cron run): ask, then re-post the same
+// data with the matching flag (a re-post can ask for the other one in turn).
+// Returns the FIRST request's jqXHR.
+function dmsSaveConfig(data, okMsg) {
+    return dmsPostJson('save_config', data).done(function(resp) {
+        if (resp && resp.needs_confirm) {
+            if (confirm(resp.message)) {
+                data[resp.needs_confirm === 'dangerous' ? '_confirm_dangerous' : '_confirm'] = true;
+                dmsSaveConfig(data, okMsg);
+            } else dmsToast('Not saved', 'info');
+            return;
+        }
+        dmsHandle(resp, okMsg);
+    });
+}
+
 // Test webhook (saves notification settings first, then tests)
 function dmsTestWebhook(type) {
     dmsToast('Saving settings and sending test...', 'info');
     // Wait for the save to land so the test uses the settings on screen
     dmsSaveNotifications().done(function(r) {
-        if (r && r.success) dmsPost('test_webhook', { type: type }).done(function(d) {
+        // needs_confirm = not saved yet (a confirmed re-post saves without testing)
+        if (r && r.success && !r.needs_confirm) dmsPost('test_webhook', { type: type }).done(function(d) {
             dmsToast(d.message || (d.success ? 'Test sent!' : 'Test failed'), d.success ? 'success' : 'error');
         });
     });
@@ -240,9 +259,7 @@ function dmsSaveNotifications() {
         warning_days: parseInt($('#cfg-uk-warning-days').val()) || 7
     };
 
-    return dmsPostJson('save_config', data).done(function(resp) {
-        dmsHandle(resp, 'Notification settings saved!');
-    });
+    return dmsSaveConfig(data, 'Notification settings saved!');
 }
 
 // Save settings
@@ -257,9 +274,7 @@ function dmsSaveSettings() {
         double_miss: $('#cfg-double-miss').is(':checked')
     };
 
-    return dmsPostJson('save_config', data).done(function(resp) {
-        dmsHandle(resp, 'Settings saved!');
-    });
+    return dmsSaveConfig(data, 'Settings saved!');
 }
 
 // Save actions
@@ -293,9 +308,7 @@ function dmsSaveActions() {
         }
     };
 
-    return dmsPostJson('save_config', data).done(function(resp) {
-        dmsHandle(resp, 'Actions saved!');
-    });
+    return dmsSaveConfig(data, 'Actions saved!');
 }
 
 // Add/remove deletions
@@ -341,6 +354,13 @@ function dmsDryRun() {
                 text += '  ' + r.action + '\n';
                 if (r.exists !== undefined) text += '    Exists: ' + (r.exists ? 'Yes' : 'No') + '\n';
                 if (r.executable !== undefined) text += '    Executable: ' + (r.executable ? 'Yes' : 'No') + '\n';
+                if (r.danger === 'forbidden') text += '    REFUSED: system root\n';
+                else if (r.danger === 'array_root') text += '    DANGEROUS: whole array/pool\n';
+                if (r.matches && r.matches.length) {
+                    text += '    Matches:\n';
+                    $.each(r.matches, function(j, m) { text += '      ' + m + '\n'; });
+                    if (r.match_count > r.matches.length) text += '      ... and ' + (r.match_count - r.matches.length) + ' more\n';
+                }
             });
             if (results.length === 0) text += '  No actions configured.\n';
             $('#dms-dry-run-output').text(text);

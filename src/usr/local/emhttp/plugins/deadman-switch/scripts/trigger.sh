@@ -73,6 +73,13 @@ foreach ($config['actions']['deletions'] ?? [] as $del) {
     if (empty($matches)) $matches = [$del['path']];
 
     foreach ($matches as $path) {
+        // A system root is never deleted, even from a config saved before
+        // save-time validation existed. Whole-array paths run as configured.
+        if (dms_classify_deletion_path($path) === 'forbidden') {
+            dms_log("REFUSED (system root): $path", 'ERROR');
+            $failures++;
+            continue;
+        }
         if ($dry) {
             dms_log("[DRY RUN] Would delete: $path (method: $method)", 'WARN');
             continue;

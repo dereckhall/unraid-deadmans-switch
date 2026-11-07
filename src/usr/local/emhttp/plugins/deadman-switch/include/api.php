@@ -208,9 +208,16 @@ switch ($action) {
             echo json_encode(['error' => 'Invalid input']);
             break;
         }
+        $confirm = !empty($input['_confirm']);
+        $confirm_dangerous = !empty($input['_confirm_dangerous']);
+        unset($input['_confirm'], $input['_confirm_dangerous']);
         $old_cron = $config['cron_interval_minutes'] ?? 60;
         $old_interval = $config['checkin_interval_days'];
-        $config = dms_update_config(function($c) use ($input) {
+        $old_external_url = trim((string)($config['external_url'] ?? ''));
+        // The merge runs twice: once on a preview (checks only, nothing
+        // written) and again inside the config lock against the freshly
+        // loaded config, so a concurrent save on another tab is never lost
+        $merge = function(array $c) use ($input) {
             $c = array_replace_recursive($c, $input);
             // List-valued keys must replace wholesale: a recursive merge keys
             // numeric arrays by index, so entries removed in the UI would
@@ -225,11 +232,64 @@ switch ($action) {
             // UI field arrives as null and would otherwise zero the interval,
             // making the deadline equal to the last check-in (instant grace)
             return dms_sanitize_config($c);
+        };
+        $preview = $merge($config);
+        if ($errors = dms_validate_config($preview)) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => implode("\n", $errors)]);
+            break;
+        }
+        // Confirm whole-array/pool paths once, when they are added: paths
+        // already saved (and confirmed) must not re-prompt on every save of
+        // every tab
+        $dangerous = array_values(array_diff(dms_has_array_root_paths($preview), dms_has_array_root_paths($config)));
+        if ($dangerous && !$confirm_dangerous) {
+            echo json_encode(['success' => false, 'needs_confirm' => 'dangerous',
+                'message' => "These paths delete an entire array or pool:\n" . implode("\n", $dangerous) . "\nContinue?"]);
+            break;
+        }
+        // Shortening the interval or grace on an armed switch so the deadline
+        // lands before the next cron run: say what the next check will do
+        if ($state['armed'] && !$state['triggered'] && $state['last_checkin'] && !$confirm) {
+            $base = dms_parse_time($state['last_checkin']);
+            $shrinks = $preview['checkin_interval_days'] < $config['checkin_interval_days'] ||
+                       $preview['grace_period_hours'] < $config['grace_period_hours'];
+            if ($base !== null && $shrinks) {
+                $new_deadline = $base + $preview['checkin_interval_days'] * 86400 + dms_pause_credit_seconds($state);
+                $new_grace_end = $new_deadline + $preview['grace_period_hours'] * 3600;
+                $next_cron = time() + $preview['cron_interval_minutes'] * 60;
+                if ($new_deadline <= $next_cron) {
+                    $ago = round((time() - $base) / 86400, 1);
+                    $when = $new_deadline <= time() ? 'has already passed' : 'passes before the next cron run';
+                    if (!empty($preview['double_miss']) && intval($state['missed_count']) < 1) $then = 'count a missed check-in and reset the timer (double-miss protection)';
+                    elseif ($new_grace_end <= $next_cron) $then = 'TRIGGER';
+                    else $then = 'enter its grace period';
+                    echo json_encode(['success' => false, 'needs_confirm' => 'shorten',
+                        'message' => "Your last check-in was $ago days ago. With these settings the deadline $when and the switch will $then on the next check. Check in first, or continue anyway?"]);
+                    break;
+                }
+            }
+        }
+        // Inside the lock: re-merge onto the fresh config and re-validate, so
+        // no save can leave an invalid config on disk
+        $rejected = null;
+        $config = dms_update_config(function($c) use ($merge, &$rejected) {
+            $m = $merge($c);
+            if ($e = dms_validate_config($m)) {
+                $rejected = $e;
+                return $c;
+            }
+            return $m;
         });
         if (!is_array($config)) {
             http_response_code(500);
             $load_err = dms_config_load_error();
             echo json_encode(['error' => $load_err ?? 'Failed to write config file (flash full or read-only?)']);
+            break;
+        }
+        if ($rejected) {
+            http_response_code(409);
+            echo json_encode(['success' => false, 'error' => "Settings changed concurrently; please retry.\n" . implode("\n", $rejected)]);
             break;
         }
 
@@ -252,8 +312,11 @@ switch ($action) {
 
         dms_log("Configuration updated");
         $resp = ['success' => true];
-        // Verify a submitted External API URL after the write; never blocks the save
-        if (array_key_exists('external_url', $input) && trim((string)($config['external_url'] ?? '')) !== '') {
+        // Verify a changed External API URL after the write; never blocks the
+        // save. Only when it changed: the Settings tab sends it on every save
+        // and an unreachable URL costs up to 5 s
+        $new_external_url = trim((string)($config['external_url'] ?? ''));
+        if (array_key_exists('external_url', $input) && $new_external_url !== '' && $new_external_url !== $old_external_url) {
             $probe_code = 0;
             $probe = dms_probe_external_url(trim((string)$config['external_url']), $probe_code);
             if ($probe === 'wrong_service') {

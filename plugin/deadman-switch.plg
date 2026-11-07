@@ -4,7 +4,7 @@
 <PLUGIN
   name="deadman-switch"
   author="Dereck"
-  version="2026.07.22a"
+  version="2026.11.07a"
   launch="Settings/deadman-switch"
   pluginURL="https://raw.githubusercontent.com/dereckhall/unraid-deadmans-switch/main/plugin/deadman-switch.plg"
   
@@ -15,6 +15,71 @@
 
 <CHANGES>
 <![CDATA[
+
+### 2026.11.07a
+
+### Fixes
+
+- External API server (port 3801): stopping it now stops every worker process, so the port is freed and restarts no longer fail to bind.
+- A corrupt or empty `state.json`/`config.json` is now detected and logged instead of silently loading as defaults; the corrupt file is never overwritten with defaults. When a `.bak` exists it is restored over it and the corrupt bytes are kept in a `.corrupt` file.
+- A failed save can no longer leave a 0-byte settings or state file.
+- Old settings with empty numeric values no longer cause errors in the status API.
+- An unreadable Last Check-in time no longer causes an immediate trigger; on an armed switch the cron check stops and alerts instead.
+- Pausing now really freezes the countdown everywhere (the plugin page, status API, Discord embeds): the remaining time is frozen; the deadline timestamp moves out by the length of the pause. It no longer keeps shrinking while paused and jumping back on unpause.
+- The plugin page's Dashboard tab now shows PAUSED, GRACE PERIOD and TRIGGERED correctly instead of "Expired" or a ticking countdown.
+- The Dashboard tile reports a clock problem instead of negative "ago" times, and shows when the switch was restored from a backup and needs re-arming.
+- Quick check-in links: link previews and URL scanners can no longer record a check-in (or use up the link).
+- Check-in, arm, disarm, pause, API-key and dry-run actions now report an error when the flash drive write fails, instead of claiming success.
+- Double-miss: a webhook that keeps failing no longer stalls the switch; after the grace period the first-miss reset happens anyway and an ERROR is logged.
+- Double-miss on a flash drive that cannot be written: the first-miss reset cannot be recorded, so the switch stays parked and will NOT trigger until the flash drive is writable. It says so honestly: an ERROR in the log and syslog and a webhook alert once per boot, and no "timer has been reset" message is sent.
+- Trigger actions run at most once per boot until you re-arm, even if the flash drive cannot record that the switch triggered.
+- A failing cron check, an unreadable state file, an unparseable Last Check-in time, or a restored state or config file now alerts once per boot by webhook when PHP still runs, and always logs to syslog, instead of failing silently.
+- A missing `config.json` or `state.json` (for example an unmounted flash drive) is now logged to syslog on every cron check instead of being skipped silently. ERROR and CRITICAL lines from the cron, trigger and notification scripts are also mirrored to syslog.
+- Uptime Kuma reports down when the state or config file is unreadable and after a restore from backup, and mentions persistent notification failures.
+- The Uptime Kuma message now shows when notifications started failing, and a webhook outage no longer causes a flash write on every cron check.
+- Custom webhooks: the body template's placeholders are now filled in; before, the template was sent exactly as typed. Text values are JSON-escaped, numbers are inserted bare, and a WARN is logged if a JSON template is no longer valid JSON after filling in.
+- Custom webhooks now also receive the double-miss "first deadline missed" warning, the clock-problem warning and the failure alerts. With an empty body template the alert text is sent directly; to include it in a body template, use the new `{{message}}` placeholder. Alerts about an unreadable or missing state file are always sent as the plain alert text, so a template can never report a wrong status for them.
+- Each notification now creates one quick check-in link shared by every channel and retry, instead of up to four.
+- Two settings saves at the same time (for example from two browser tabs) can no longer overwrite each other's changes. If combining them would produce invalid settings, the later save is refused with a request to retry.
+- The cron schedule is now written by one piece of code, so install, boot and the Settings tab can no longer disagree about the schedule. The cron file is only rewritten when the schedule changes (no more "Cron schedule updated" log line on every boot), and a failed write is logged as an ERROR.
+- The web UI shows an error message for every failed action (for example an expired login or a failed save). An expired login now shows "Session expired - reload the page" instead of "Request failed (HTTP 200)".
+- The webhook Test button now waits for the settings save to succeed before sending.
+- Click-to-copy now works when the Unraid UI is opened over plain HTTP.
+- The countdown color now follows your configured warning thresholds.
+
+### Behavior changes
+
+- If `state.json` or `config.json` is corrupt and its `.bak` copy is usable, it is restored from the backup and the switch is **DISARMED**. A banner at the top of the Dashboard tab of the plugin page (Settings > Dead Man's Switch) and a webhook alert tell you to check Last Check-in and the Actions tab (the restored actions list may predate your last save), then re-arm. If no usable backup exists, the switch refuses to save anything and shows a red banner on the Dashboard tab until the file is repaired.
+- Quick check-in links now open a confirmation page; the check-in is recorded only when you press its button. Other request methods get 405.
+- Settings are validated when you save: warning thresholds must strictly increase, and the grace period must be at least one cron check interval. Deletion paths that are a system root (`/`, `/boot`, `/mnt`, `/usr`, `/etc`, `/var`, `/root`, `/home`, `/tmp` and similar), glob patterns directly under one (such as `/boot/*` or `/etc/*`), and patterns with a match that is a system root (such as a symlink to `/` inside a share) are refused on save, and refused again when the switch triggers, even if they were saved by an older version: they are skipped with a `REFUSED (system root)` ERROR in the log, and the Actions tab marks them with a red tag. The error, the tag and the Dry Test name the match or symlink responsible. A plain path such as `/boot/config/myfile` is still allowed.
+- Reinstalling the plugin after uninstalling it no longer triggers immediately when the deadline plus grace period had already passed while it was removed: the switch is **DISARMED** instead, the install output shows a NOTICE and an ERROR is logged. Re-arm it after reviewing your settings. If the state or settings file cannot be read at that moment, or the disarm cannot be written, an ERROR is logged and the check runs again at the next install or boot. A normal reboot never disarms the switch. Uninstalling now prints a NOTE when the switch is still armed.
+- Deletion paths that remove an entire array or pool (`/mnt/user`, `/mnt/cache`, `/mnt/diskN` and other `/mnt/<name>` paths, and glob patterns directly under one, such as `/mnt/user/*` or `/mnt/*`) still work, but ask for confirmation when you add them and are marked with an orange tag on the Actions tab.
+- Shortening the check-in interval or grace period on an armed switch so that the deadline lands before the next cron check now asks for confirmation, and says whether the next check would count a missed check-in, enter the grace period, or trigger.
+- The Dry Test lists the files each glob pattern currently matches (the first 20 and a count of the rest) and tags system-root and whole-array paths.
+- A new External API URL is tested when you save it: the save always goes through, but you get a warning if the URL answers and is not this plugin's API (for example the Unraid web UI), or cannot be reached from the server. The saved URL is also tested once per boot, with an ERROR and a webhook alert only when it answers but is not this plugin's API.
+- Custom webhooks with method GET send a bare request with no body.
+- Check-ins (web UI, API, quick links and `checkin.sh`) are refused while the switch is disarmed or has triggered; after a trigger, disarm and re-arm first. `checkin.sh` prints the reason and exits nonzero.
+- Pausing an already-paused switch extends the pause instead of restarting it; pause is refused when the switch is disarmed or triggered.
+- The notifications-failing banner at the top of the Dashboard tab shows since when notifications have been failing on every channel.
+- The authenticated `include/api.php?action=status` response now uses the same field names as the port-3801 status API (only matters if you call it directly).
+- Docs and the Settings tab examples now send the API key in the `X-Api-Key` header. `&key=` in the URL still works, but a key in the URL ends up in browser history and proxy logs.
+
+### Files and paths
+
+- New `state.json.bak` and `config.json.bak` next to the settings on the flash drive: a copy of the last good version. After a restore, the corrupt original is kept as `state.json.corrupt` or `config.json.corrupt`.
+- Deleting `config.json` resets all settings to defaults.
+- New RAM directory `/var/run/deadman-switch/` holds the API server PID file, per-boot alert markers (`alert.*`), the External API URL check marker and the trigger marker.
+- The API server PID file moved from the flash drive to `/var/run/deadman-switch/api-server.pid`; the old file is cleaned up automatically.
+- Uninstalling leaves a `.removed` file in the settings folder on the flash drive; the next install uses it to decide whether to disarm, then deletes it (it is kept when the state or settings file is unreadable, so the check runs again at the next install or boot).
+- The cron file `deadman-switch.cron` is now written only by the plugin's install script (run on every install and boot) and by the Settings tab, from the saved cron check interval.
+
+### Documentation
+
+- The External API URL setting must point to the external API on port 3801, not the Unraid web UI. If you set it before 2026.07.22a, when it was used for something else, it may still hold your web UI address, which breaks every check-in link in notifications: change it or clear it.
+- Every custom webhook placeholder, including `{{message}}`, with JSON escaping and an example body template.
+- The settings validation rules, system-root protection and whole-array confirmation.
+- Uninstall and reinstall behavior, and troubleshooting for the "restored from a backup" and "notifications failing" banners, the once-per-boot alert markers, the `REFUSED (system root)` log line and the External API URL warning.
+- Shell check-in: `/usr/local/emhttp/plugins/deadman-switch/scripts/checkin.sh [method]`.
 
 ### 2026.07.22a
 
@@ -57,10 +122,6 @@ Fix plugin icon display on installed plugins page
 
 Fix plugin icon size from 16x16 to 48x48
 
-### 2026.04.10c
-
-Add custom plugin icon to installed plugins page
-
 
 For older releases, see https://github.com/dereckhall/unraid-deadmans-switch/releases
 ]]>
@@ -76,7 +137,7 @@ Clean old package versions
 <INLINE>
 <![CDATA[
 # Remove old package versions
-rm -f $(ls /boot/config/plugins/deadman-switch/deadman-switch-*.txz 2>/dev/null | grep -v '2026.07.22a')
+rm -f $(ls /boot/config/plugins/deadman-switch/deadman-switch-*.txz 2>/dev/null | grep -v '2026.11.07a')
 
 # Create plugin directory if needed
 mkdir -p /boot/config/plugins/deadman-switch
@@ -91,15 +152,15 @@ PACKAGE INSTALLATION
 Download and install the main package
 ===========================================
 -->
-<FILE Name="/boot/config/plugins/deadman-switch/deadman-switch-2026.07.22a-noarch-1.txz">
-<URL>https://github.com/dereckhall/unraid-deadmans-switch/releases/download/2026.07.22a/deadman-switch-2026.07.22a-noarch-1.txz</URL>
-<SHA256>56f73d412f579e5151db4bba46eaccc5672c3acc7a9e3740d62a97cda250f128</SHA256>
+<FILE Name="/boot/config/plugins/deadman-switch/deadman-switch-2026.11.07a-noarch-1.txz">
+<URL>https://github.com/dereckhall/unraid-deadmans-switch/releases/download/2026.11.07a/deadman-switch-2026.11.07a-noarch-1.txz</URL>
+<SHA256>a685fbb74ec130cb175913938430ed63c7582285034daa9315b8df6af7a060ec</SHA256>
 </FILE>
 
 <FILE Run="/bin/bash">
 <INLINE>
 <![CDATA[
-upgradepkg --install-new /boot/config/plugins/deadman-switch/deadman-switch-2026.07.22a-noarch-1.txz
+upgradepkg --install-new /boot/config/plugins/deadman-switch/deadman-switch-2026.11.07a-noarch-1.txz
 ]]>
 </INLINE>
 </FILE>
@@ -115,22 +176,15 @@ POST-INSTALL SCRIPT
 # Set script permissions
 chmod +x /usr/local/emhttp/plugins/deadman-switch/scripts/*.sh 2>/dev/null
 
-# Create cron file in plugin config dir (Unraid's update_cron reads *.cron from here)
-echo "0 * * * * /usr/local/emhttp/plugins/deadman-switch/scripts/check.sh >> /boot/config/plugins/deadman-switch/logs/cron.log 2>&1" > /boot/config/plugins/deadman-switch/deadman-switch.cron
-
-# Remove legacy cron file if present (old versions wrote directly to /etc/cron.d/)
-rm -f /etc/cron.d/deadman-switch
-
-# Regenerate system crontab
-/usr/local/sbin/update_cron
-
-# Run install script (initializes config/state if needed, pass version since PLG isn't written yet)
-/usr/local/emhttp/plugins/deadman-switch/scripts/install.sh "2026.07.22a"
+# Run install script (initializes config/state, writes the check schedule from
+# the saved interval, runs the reinstall check; version passed since the PLG
+# isn't written yet)
+/usr/local/emhttp/plugins/deadman-switch/scripts/install.sh "2026.11.07a"
 
 echo ""
 echo "----------------------------------------------------"
 echo " deadman-switch has been installed."
-echo " Version: 2026.07.22a"
+echo " Version: 2026.11.07a"
 echo "----------------------------------------------------"
 echo ""
 ]]>
@@ -148,6 +202,13 @@ REMOVE SCRIPT
 # Stop external API server
 /usr/local/emhttp/plugins/deadman-switch/scripts/stop-api.sh 2>/dev/null
 
+# Record whether the switch is still armed while helpers.php is still on disk
+ARMED=$(php -r 'require_once "/usr/local/emhttp/plugins/deadman-switch/include/helpers.php"; $s = dms_load_state(); echo dms_state_load_error() !== null ? "unknown" : ($s["armed"] ? "yes" : "no");' 2>/dev/null) || ARMED=unknown
+
+# Marker: an explicit uninstall happened. The next install.sh consumes it and
+# disarms the switch if its deadline passed while the plugin was gone.
+date -u +%FT%TZ > /boot/config/plugins/deadman-switch/.removed
+
 # Remove cron file and regenerate system crontab
 rm -f /boot/config/plugins/deadman-switch/deadman-switch.cron
 rm -f /etc/cron.d/deadman-switch
@@ -164,6 +225,13 @@ echo "----------------------------------------------------"
 echo " deadman-switch has been removed."
 echo " Config preserved at /boot/config/plugins/deadman-switch/"
 echo " Delete that directory manually for a clean removal."
+if [ "$ARMED" = "yes" ]; then
+    echo " NOTE: the switch is still ARMED in the preserved state. On reinstall it resumes,"
+    echo "       unless its deadline has already passed - then it is DISARMED and you must re-arm."
+elif [ "$ARMED" != "no" ]; then
+    echo " NOTE: the armed state could not be read. On reinstall an armed switch whose"
+    echo "       deadline has already passed is DISARMED and you must re-arm."
+fi
 echo "----------------------------------------------------"
 echo ""
 ]]>

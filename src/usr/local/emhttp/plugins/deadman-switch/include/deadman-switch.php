@@ -201,7 +201,7 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
 
         <div class="dms-section">
             <h3>Message Template</h3>
-            <p class="dms-help">Variables: {{status}}, {{days_remaining}}, {{hours_remaining}}, {{checkin_link}}, {{last_checkin}}, {{message}}</p>
+            <p class="dms-help">Variables: {{status}}, {{days_remaining}}, {{hours_remaining}}, {{checkin_link}}, {{last_checkin}}</p>
             <textarea id="cfg-message-template" class="dms-textarea" rows="4"><?= htmlspecialchars($config['message_template']) ?></textarea>
         </div>
 

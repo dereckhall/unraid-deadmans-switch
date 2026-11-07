@@ -2,6 +2,7 @@
 // Uses jQuery (provided by Unraid's Dynamix framework)
 
 var DMS_API = '/plugins/deadman-switch/include/api.php';
+var DMS_TABS = ['dashboard', 'notifications', 'actions', 'settings', 'logs'];
 
 // Get CSRF token from state (set by PHP)
 function dmsCsrf() {
@@ -10,6 +11,8 @@ function dmsCsrf() {
 
 // Tab switching
 function dmsShowTab(tabName) {
+    if (DMS_TABS.indexOf(tabName) === -1) tabName = 'dashboard';
+
     $('.dms-tab').removeClass('active');
     $('.dms-tab-content').removeClass('active');
 
@@ -18,8 +21,8 @@ function dmsShowTab(tabName) {
 
     if (tabName === 'logs') dmsLoadLogs();
 
-    // Save tab state
-    localStorage.setItem('dms-active-tab', tabName);
+    // Save tab state (storage may be unavailable: private mode, blocked site data)
+    try { localStorage.setItem('dms-active-tab', tabName); } catch (e) {}
 }
 
 // Toast notifications
@@ -33,6 +36,22 @@ function dmsToast(message, type) {
     }, 3000);
 }
 
+// Shared failure handler for every API call: HTTP errors, network errors,
+// expired sessions (Unraid's CSRF check) and failed flash writes (HTTP 500)
+function dmsFail(xhr) {
+    var msg = 'Request failed (HTTP ' + xhr.status + ')';
+    try { var j = JSON.parse(xhr.responseText); msg = j.error || j.message || msg; }
+    catch (e) { if (xhr.status === 0) msg = 'Network error'; else if (/csrf/i.test(xhr.responseText || '')) msg = 'Session expired - reload the page'; }
+    dmsToast(msg, 'error');
+}
+
+// Shared .done body: toast any warning, then success (and run onOk) or the error
+function dmsHandle(resp, okMsg, onOk) {
+    if (resp && resp.warning) dmsToast(resp.warning, 'info');
+    if (resp && resp.success) { if (okMsg) dmsToast(okMsg, 'success'); if (onOk) onOk(resp); }
+    else dmsToast((resp && (resp.message || resp.error)) || 'Failed', 'error');
+}
+
 // API helper - GET requests (no CSRF needed for reads)
 function dmsGet(action, params) {
     var url = DMS_API + '?action=' + encodeURIComponent(action);
@@ -41,7 +60,7 @@ function dmsGet(action, params) {
             url += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(v);
         });
     }
-    return $.getJSON(url);
+    return $.getJSON(url).fail(dmsFail);
 }
 
 // API helper - POST with form data (Unraid requires csrf_token in $_POST)
@@ -49,7 +68,7 @@ function dmsPost(action, data) {
     data = data || {};
     data.action = action;
     data.csrf_token = dmsCsrf();
-    return $.post(DMS_API, data, null, 'json');
+    return $.post(DMS_API, data, null, 'json').fail(dmsFail);
 }
 
 // API helper - POST with JSON payload encoded as form field
@@ -61,7 +80,7 @@ function dmsPostJson(action, body) {
         action: action,
         csrf_token: dmsCsrf(),
         json_data: JSON.stringify(body)
-    }, null, 'json');
+    }, null, 'json').fail(dmsFail);
 }
 
 // Check-in
@@ -69,18 +88,15 @@ function dmsCheckIn() {
     var btn = $('#dms-checkin-btn');
     btn.prop('disabled', true).text('Checking in...');
 
+    var ok = false;
     dmsPost('web_checkin').done(function(data) {
-        if (data.success) {
+        dmsHandle(data, 'Check-in recorded successfully!', function() {
+            ok = true;
             btn.text('CHECKED IN!').addClass('success');
-            dmsToast('Check-in recorded successfully!', 'success');
             setTimeout(function() { location.reload(); }, 1500);
-        } else {
-            btn.text('CHECK IN').prop('disabled', false);
-            dmsToast(data.message || 'Check-in failed', 'error');
-        }
-    }).fail(function() {
-        btn.text('CHECK IN').prop('disabled', false);
-        dmsToast('Network error', 'error');
+        });
+    }).always(function() {
+        if (!ok) btn.text('CHECK IN').prop('disabled', false);
     });
 }
 
@@ -88,22 +104,17 @@ function dmsCheckIn() {
 function dmsArm() {
     if (!confirm('Are you sure you want to ARM the dead man\'s switch?')) return;
     dmsPost('arm').done(function(data) {
-        if (data.success) {
-            dmsToast('Switch armed!', 'success');
-            location.reload();
-        } else {
-            dmsToast(data.message || 'Failed to arm', 'error');
-        }
+        dmsHandle(data, 'Switch armed!', function() { location.reload(); });
     });
 }
 
 function dmsDisarm() {
     if (!confirm('Are you sure you want to DISARM the dead man\'s switch?')) return;
     dmsPost('disarm').done(function(data) {
-        if (data.success) {
+        dmsHandle(data, null, function() {
             dmsToast('Switch disarmed', 'info');
             location.reload();
-        }
+        });
     });
 }
 
@@ -112,47 +123,63 @@ function dmsPause() {
     var hours = prompt('Pause for how many hours? The countdown is frozen while paused - the deadline moves out by the time spent paused.', '24');
     if (!hours) return;
     dmsPost('pause', { hours: hours }).done(function(data) {
-        if (data.success) {
+        dmsHandle(data, null, function() {
             dmsToast('Timer paused', 'info');
             location.reload();
-        }
+        });
     });
 }
 
 function dmsUnpause() {
     dmsPost('unpause').done(function(data) {
-        if (data.success) {
+        dmsHandle(data, null, function() {
             dmsToast('Timer unpaused', 'info');
             location.reload();
-        }
+        });
     });
 }
 
 // Copy text to clipboard
 function dmsCopyText(el) {
     var text = el.textContent.trim();
-    navigator.clipboard.writeText(text).then(function() {
-        dmsToast('Copied to clipboard', 'success');
-    }).catch(function() {
-        // Fallback for older browsers
+
+    function ok() { dmsToast('Copied to clipboard', 'success'); }
+
+    // navigator.clipboard only exists in secure contexts (HTTPS/localhost);
+    // Unraid is usually reached over plain http://LAN-IP, so fall back
+    function fallback() {
         var ta = document.createElement('textarea');
         ta.value = text;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '0';
+        ta.style.left = '0';
+        ta.style.opacity = '0';
         document.body.appendChild(ta);
+        ta.focus();
         ta.select();
-        document.execCommand('copy');
+        var copied = false;
+        try { copied = document.execCommand('copy'); } catch (e) { copied = false; }
         document.body.removeChild(ta);
-        dmsToast('Copied to clipboard', 'success');
-    });
+        if (copied) ok();
+        else dmsToast('Copy failed - select the text manually', 'error');
+    }
+
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(ok).catch(fallback);
+    } else {
+        fallback();
+    }
 }
 
 // Delete API key
 function dmsDeleteApiKey() {
     if (!confirm('Delete the API key? Any scripts or automations using it will stop working.')) return;
     dmsPostJson('save_config', { api_key: '' }).done(function(resp) {
-        if (resp.success) {
+        dmsHandle(resp, null, function() {
             dmsToast('API key deleted', 'info');
             location.reload();
-        }
+        });
     });
 }
 
@@ -160,26 +187,21 @@ function dmsDeleteApiKey() {
 function dmsGenerateApiKey() {
     if (!confirm('Generate a new API key? The old key will stop working.')) return;
     dmsPost('generate_api_key').done(function(data) {
-        if (data.success) {
-            dmsToast('New API key generated', 'success');
+        dmsHandle(data, 'New API key generated', function() {
             setTimeout(function() { location.reload(); }, 500);
-        }
+        });
     });
 }
 
 // Test webhook (saves notification settings first, then tests)
 function dmsTestWebhook(type) {
     dmsToast('Saving settings and sending test...', 'info');
-    dmsSaveNotifications();
-    setTimeout(function() {
-        dmsPost('test_webhook', { type: type }).done(function(data) {
-            dmsToast(data.message || (data.success ? 'Test sent!' : 'Test failed'), data.success ? 'success' : 'error');
-        }).fail(function(xhr) {
-            var msg = 'Request failed';
-            try { msg = JSON.parse(xhr.responseText).error || msg; } catch(e) {}
-            dmsToast(msg, 'error');
+    // Wait for the save to land so the test uses the settings on screen
+    dmsSaveNotifications().done(function(r) {
+        if (r && r.success) dmsPost('test_webhook', { type: type }).done(function(d) {
+            dmsToast(d.message || (d.success ? 'Test sent!' : 'Test failed'), d.success ? 'success' : 'error');
         });
-    }, 500);
+    });
 }
 
 // Save notifications
@@ -211,8 +233,8 @@ function dmsSaveNotifications() {
         warning_days: parseInt($('#cfg-uk-warning-days').val()) || 7
     };
 
-    dmsPostJson('save_config', data).done(function(resp) {
-        dmsToast(resp.success ? 'Notification settings saved!' : 'Save failed', resp.success ? 'success' : 'error');
+    return dmsPostJson('save_config', data).done(function(resp) {
+        dmsHandle(resp, 'Notification settings saved!');
     });
 }
 
@@ -228,8 +250,8 @@ function dmsSaveSettings() {
         double_miss: $('#cfg-double-miss').is(':checked')
     };
 
-    dmsPostJson('save_config', data).done(function(resp) {
-        dmsToast(resp.success ? 'Settings saved!' : 'Save failed', resp.success ? 'success' : 'error');
+    return dmsPostJson('save_config', data).done(function(resp) {
+        dmsHandle(resp, 'Settings saved!');
     });
 }
 
@@ -264,8 +286,8 @@ function dmsSaveActions() {
         }
     };
 
-    dmsPostJson('save_config', data).done(function(resp) {
-        dmsToast(resp.success ? 'Actions saved!' : 'Save failed', resp.success ? 'success' : 'error');
+    return dmsPostJson('save_config', data).done(function(resp) {
+        dmsHandle(resp, 'Actions saved!');
     });
 }
 
@@ -304,24 +326,19 @@ function dmsRemoveScript(btn) {
 function dmsDryRun() {
     dmsToast('Running dry test...', 'info');
     dmsPost('dry_run').done(function(data) {
-        if (data.success) {
+        // dmsHandle toasts data.warning (e.g. the run could not be recorded)
+        dmsHandle(data, 'Dry run complete!', function() {
+            var results = data.results || [];
             var text = 'Dry Run Results:\n\n';
-            $.each(data.results, function(i, r) {
+            $.each(results, function(i, r) {
                 text += '  ' + r.action + '\n';
                 if (r.exists !== undefined) text += '    Exists: ' + (r.exists ? 'Yes' : 'No') + '\n';
                 if (r.executable !== undefined) text += '    Executable: ' + (r.executable ? 'Yes' : 'No') + '\n';
             });
-            if (data.results.length === 0) text += '  No actions configured.\n';
+            if (results.length === 0) text += '  No actions configured.\n';
             $('#dms-dry-run-output').text(text);
             $('#dms-dry-run-results').show();
-            dmsToast('Dry run complete!', 'success');
-        } else {
-            dmsToast(data.message || data.error || 'Dry run failed', 'error');
-        }
-    }).fail(function(xhr) {
-        var msg = 'Request failed';
-        try { msg = JSON.parse(xhr.responseText).error || msg; } catch(e) {}
-        dmsToast(msg, 'error');
+        });
     });
 }
 
@@ -332,30 +349,45 @@ function dmsLoadLogs() {
     if (filterVal) params.filter = filterVal;
 
     dmsGet('get_logs', params).done(function(data) {
-        if (data.logs && data.logs.length > 0) {
+        if (!data || !Array.isArray(data.logs)) {
+            $('#dms-log-output').text('Could not load logs.');
+        } else if (data.logs.length > 0) {
             $('#dms-log-output').text(data.logs.join('\n'));
         } else {
             $('#dms-log-output').text('No log entries found.');
         }
+    }).fail(function() {
+        $('#dms-log-output').text('Could not load logs.');
     });
 }
 
 function dmsClearLogs() {
     if (!confirm('Clear all logs?')) return;
     dmsPost('clear_logs').done(function(data) {
-        if (data.success) {
+        dmsHandle(data, null, function() {
             dmsToast('Logs cleared', 'info');
             dmsLoadLogs();
-        }
+        });
     });
+}
+
+// Countdown colour for the elapsed percentage, following the configured
+// warning thresholds (same comparisons as dms_get_warning_level())
+function dmsCountdownColor(pct, t) {
+    t = t || {};
+    if (pct >= t.critical) return '#f44336';
+    if (pct >= t.warning) return '#ff9800';
+    if (pct >= t.reminder) return '#ffc107';
+    return '';
 }
 
 // Initialization
 $(function() {
     if (typeof dmsState === 'undefined') return;
 
-    // Restore saved tab
-    var savedTab = localStorage.getItem('dms-active-tab');
+    // Restore saved tab (dmsShowTab falls back to dashboard for unknown names)
+    var savedTab = null;
+    try { savedTab = localStorage.getItem('dms-active-tab'); } catch (e) {}
     if (savedTab) {
         dmsShowTab(savedTab);
     }
@@ -405,13 +437,10 @@ $(function() {
 
         countdownEl.text(parts.join(' '));
 
-        // Color based on urgency
-        var total = startRemaining;
-        var pct = ((total - remaining) / total) * 100;
-        if (pct > 90) {
-            countdownEl.css('color', '#f44336');
-        } else if (pct > 75) {
-            countdownEl.css('color', '#ff9800');
+        // Color based on urgency: elapsed share of the full check-in interval
+        if (dmsState.totalSeconds > 0) {
+            var pct = Math.min(100, Math.max(0, (dmsState.totalSeconds - remaining) / dmsState.totalSeconds * 100));
+            countdownEl.css('color', dmsCountdownColor(pct, dmsState.thresholds));
         }
     }
 

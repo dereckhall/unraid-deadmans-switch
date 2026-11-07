@@ -400,6 +400,8 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
         armed: <?= json_encode($state['armed']) ?>,
         remaining: <?= $remaining !== null ? json_encode($remaining) : 'null' ?>,
         paused: <?= json_encode($state['paused']) ?>,
+        totalSeconds: <?= intval($config['checkin_interval_days']) * 86400 ?>,
+        thresholds: <?= json_encode($config['warning_thresholds']) ?>,
         csrfToken: <?= json_encode($var['csrf_token'] ?? '') ?>
     };
 </script>

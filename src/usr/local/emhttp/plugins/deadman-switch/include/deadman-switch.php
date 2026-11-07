@@ -201,7 +201,7 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
 
         <div class="dms-section">
             <h3>Message Template</h3>
-            <p class="dms-help">Variables: {{status}}, {{days_remaining}}, {{hours_remaining}}, {{checkin_link}}, {{last_checkin}}</p>
+            <p class="dms-help">Variables: {{status}}, {{days_remaining}}, {{hours_remaining}}, {{checkin_link}}, {{last_checkin}}, {{message}}</p>
             <textarea id="cfg-message-template" class="dms-textarea" rows="4"><?= htmlspecialchars($config['message_template']) ?></textarea>
         </div>
 
@@ -239,6 +239,7 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
                 </label>
                 <label>Body Template (JSON):
                     <textarea id="cfg-wh-custom-body_template" class="dms-textarea" rows="3"><?= htmlspecialchars($config['webhooks']['custom']['body_template']) ?></textarea>
+                    <span class="dms-help">Same variables as the message template; {{message}} is the notification text. Placeholders are rendered and JSON-escaped; GET sends a bare request with no body.</span>
                 </label>
                 <button class="dms-btn dms-btn-sm" onclick="dmsTestWebhook('custom')">Test</button>
             </div>
@@ -327,7 +328,7 @@ $status_label = $status_labels[$status] ?? strtoupper($status);
                 </label>
                 <label>External API URL:
                     <input type="url" id="cfg-external-url" value="<?= htmlspecialchars($config['external_url']) ?>" class="dms-input" placeholder="https://dms.mydomain.com (optional)">
-                    <span class="dms-help">Public URL that routes to the external API (port 3801), e.g. via reverse proxy or port forward. Used for check-in links in notifications so they work away from home. Leave blank to use the LAN address.</span>
+                    <span class="dms-help">Public URL that routes to the external API (port 3801), e.g. via reverse proxy or port forward. Used for check-in links in notifications so they work away from home. Leave blank to use the LAN address. Do <strong>not</strong> enter your Unraid web UI address.</span>
                 </label>
                 <label>Cron Check Interval (minutes):
                     <input type="number" id="cfg-cron-interval" value="<?= $config['cron_interval_minutes'] ?>" min="5" max="1440" class="dms-input dms-input-sm">

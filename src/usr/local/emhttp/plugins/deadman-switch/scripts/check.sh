@@ -57,6 +57,36 @@ if [ ! -f "$CONFIG_FILE" ] || [ ! -f "$STATE_FILE" ]; then
     exit 0
 fi
 
+# External API URL check, once per boot (the probe can take up to 5 s). A URL
+# that answers but is not the DMS API (e.g. the Unraid web UI, as allowed
+# before 2026.07.22a) breaks every check-in link: log ERROR and alert. An
+# unreachable URL is normal without NAT loopback: INFO only. Not marked done
+# while config.json is unreadable or a wrong_service alert is still unsent.
+if [ ! -e "$RUN_DIR/probe.external-url" ]; then
+    PROBE=$(php -r 'require_once "/usr/local/emhttp/plugins/deadman-switch/include/helpers.php";
+        $c = dms_load_config();
+        if (dms_config_load_error() !== null) { echo "skip"; exit; }
+        $u = trim((string)($c["external_url"] ?? ""));
+        if ($u === "") { echo "none"; exit; }
+        $code = 0; $r = dms_probe_external_url($u, $code);
+        echo $r, " ", $code, " ", $u;' 2>/dev/null)
+    read -r PROBE_RESULT PROBE_CODE PROBE_URL <<< "$PROBE"
+    case "$PROBE_RESULT" in
+        ok|none)
+            touch "$RUN_DIR/probe.external-url"
+            ;;
+        unreachable)
+            log "External API URL $PROBE_URL could not be reached from this server (expected if your network lacks NAT loopback; otherwise check the proxy)"
+            touch "$RUN_DIR/probe.external-url"
+            ;;
+        wrong_service)
+            log "External API URL $PROBE_URL answers (HTTP $PROBE_CODE) but is not the Dead Man's Switch API; check-in links in notifications will not work" ERROR
+            alert_once external-url "External API URL $PROBE_URL answers but does not reach the Dead Man's Switch API on $(hostname). Check-in links in notifications will not work. Fix it under Settings or clear it to use the LAN address."
+            [ -e "$RUN_DIR/alert.external-url" ] && touch "$RUN_DIR/probe.external-url"
+            ;;
+    esac
+fi
+
 # Persist the highest notified level only after a delivery succeeded, so a
 # failed send is retried on the next cron cycle. $2 is the epoch of the
 # check-in the notification was computed from: if the user checked in while

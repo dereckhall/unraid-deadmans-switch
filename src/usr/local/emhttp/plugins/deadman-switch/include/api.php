@@ -251,7 +251,18 @@ switch ($action) {
         }
 
         dms_log("Configuration updated");
-        echo json_encode(['success' => true]);
+        $resp = ['success' => true];
+        // Verify a submitted External API URL after the write; never blocks the save
+        if (array_key_exists('external_url', $input) && trim((string)($config['external_url'] ?? '')) !== '') {
+            $probe_code = 0;
+            $probe = dms_probe_external_url(trim((string)$config['external_url']), $probe_code);
+            if ($probe === 'wrong_service') {
+                $resp['warning'] = "External API URL answered but is not the Dead Man's Switch API (HTTP $probe_code). It must route to port 3801, not the Unraid web UI; check-in links will not work until it does.";
+            } elseif ($probe === 'unreachable') {
+                $resp['warning'] = "External API URL could not be reached from this server. Expected if your network lacks NAT loopback; otherwise check the proxy.";
+            }
+        }
+        echo json_encode($resp);
         break;
 
     case 'generate_api_key':

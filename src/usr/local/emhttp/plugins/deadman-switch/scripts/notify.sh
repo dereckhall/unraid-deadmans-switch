@@ -28,13 +28,20 @@ require_once '/usr/local/emhttp/plugins/deadman-switch/include/helpers.php';
 $config = dms_load_config();
 $state = dms_load_state();
 
-$message = dms_render_template($config['message_template'], $config, $state);
+// Mint ONE quick check-in token for this notification and hand the same link
+// to the template and every send attempt: one state write per notification,
+// none per retry. null (disarmed, triggered, mint failed) = no link anywhere.
+$has_enabled = false;
+foreach ($config['webhooks'] as $wh) { if (!empty($wh['enabled'])) $has_enabled = true; }
+$opts = ['checkin_link' => $has_enabled ? dms_make_checkin_link($config, $state) : null];
+
+$message = dms_render_template($config['message_template'], $config, $state, $opts);
 $max_retries = 3;
 $base_delay = 5;
 
-function send_webhook_with_retry($type, $webhook_config, $message, $config, $state, $max_retries, $base_delay) {
+function send_webhook_with_retry($type, $webhook_config, $message, $config, $state, $max_retries, $base_delay, $opts) {
     for ($attempt = 1; $attempt <= $max_retries; $attempt++) {
-        $result = dms_send_webhook($type, $webhook_config, $message, $config, $state);
+        $result = dms_send_webhook($type, $webhook_config, $message, $config, $state, $opts);
         if ($result['success']) {
             dms_log("Notification sent via $type");
             return true;
@@ -53,7 +60,7 @@ $succeeded = 0;
 foreach ($config['webhooks'] as $type => $wh) {
     if (!$wh['enabled']) continue;
     $enabled++;
-    if (send_webhook_with_retry($type, $wh, $message, $config, $state, $max_retries, $base_delay)) {
+    if (send_webhook_with_retry($type, $wh, $message, $config, $state, $max_retries, $base_delay, $opts)) {
         $succeeded++;
     }
 }

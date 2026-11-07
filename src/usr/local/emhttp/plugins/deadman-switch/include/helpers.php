@@ -670,23 +670,42 @@ function dms_format_time_remaining($seconds) {
     return implode(' ', $parts);
 }
 
-function dms_render_template($template, $config, $state) {
+// A string as it appears between the quotes of a JSON string literal
+function dms_json_escape($v) {
+    return substr(json_encode((string)$v, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 1, -1);
+}
+
+// $opts: 'checkin_link' => string|null (caller already minted; null = no
+// link, never mint here), 'message' => text for {{message}}, 'escape' =>
+// 'json' to JSON-escape string values (numbers stay bare). Without a supplied
+// link, a token is minted only when the template actually uses {{checkin_link}}.
+function dms_render_template($template, $config, $state, array $opts = []) {
     $remaining = dms_time_remaining($config, $state);
     $days = $remaining ? max(0, round($remaining / 86400, 1)) : 0;
     $hours = $remaining ? max(0, round($remaining / 3600)) : 0;
     $status = dms_get_status($config, $state);
 
-    $checkin_link = dms_make_checkin_link($config, $state) ?? 'N/A';
+    if (!array_key_exists('checkin_link', $opts) && strpos((string)$template, '{{checkin_link}}') !== false) {
+        $checkin_link = dms_make_checkin_link($config, $state) ?? 'N/A';
+    } else {
+        $checkin_link = $opts['checkin_link'] ?? 'N/A';
+    }
 
-    $vars = [
+    $strings = [
         '{{status}}'          => strtoupper(str_replace('_', ' ', $status)),
-        '{{days_remaining}}'  => $days,
-        '{{hours_remaining}}' => $hours,
         '{{checkin_link}}'    => $checkin_link,
         '{{last_checkin}}'    => $state['last_checkin'] ?? 'Never',
+        '{{message}}'         => $opts['message'] ?? '',
+    ];
+    if (($opts['escape'] ?? null) === 'json') {
+        $strings = array_map('dms_json_escape', $strings);
+    }
+    $vars = $strings + [
+        '{{days_remaining}}'  => $days,
+        '{{hours_remaining}}' => $hours,
     ];
 
-    return str_replace(array_keys($vars), array_values($vars), $template);
+    return str_replace(array_keys($vars), array_values($vars), (string)$template);
 }
 
 function dms_get_log_entries($limit = 100, $filter = null) {
@@ -704,7 +723,9 @@ function dms_get_log_entries($limit = 100, $filter = null) {
     return array_slice($lines, 0, $limit);
 }
 
-function dms_build_discord_embed($config, $state) {
+// $checkin_link: null = mint one here (only when armed and not triggered);
+// a string = use it; false = the caller already decided there is no link
+function dms_build_discord_embed($config, $state, $checkin_link = null) {
     $status = dms_get_status($config, $state);
     $remaining = dms_time_remaining($config, $state);
     $remaining_text = $remaining !== null ? dms_format_time_remaining($remaining) : 'N/A';
@@ -769,8 +790,8 @@ function dms_build_discord_embed($config, $state) {
         }
     }
 
-    $link = dms_make_checkin_link($config, $state);
-    if ($link !== null) {
+    $link = $checkin_link === null ? dms_make_checkin_link($config, $state) : $checkin_link;
+    if (is_string($link) && $link !== '') {
         $fields[] = ['name' => 'Check In', 'value' => "[Click here to check in]($link)", 'inline' => false];
     }
 
@@ -786,7 +807,10 @@ function dms_build_discord_embed($config, $state) {
     ];
 }
 
-function dms_send_webhook($type, $webhook_config, $message, $config = null, $state = null) {
+// $opts: 'checkin_link' => string|null, already minted by the caller (null =
+// no link; nothing is minted here when the key is present), 'plain' => true
+// to send $message as plain Discord text instead of the status embed
+function dms_send_webhook($type, $webhook_config, $message, $config = null, $state = null, array $opts = []) {
     $ch = curl_init();
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_TIMEOUT, 10);
@@ -798,9 +822,12 @@ function dms_send_webhook($type, $webhook_config, $message, $config = null, $sta
             curl_setopt($ch, CURLOPT_POST, true);
             curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
 
-            // Use rich embed if config/state available, fall back to plain text
-            if ($config && $state) {
-                $payload = ['embeds' => [dms_build_discord_embed($config, $state)]];
+            // Rich embed for status notifications; plain text for alerts
+            // (first miss, clock anomaly, broadcasts) and without config/state
+            if ($config && $state && empty($opts['plain'])) {
+                // false tells the embed "caller decided: no link" (do not mint)
+                $link = array_key_exists('checkin_link', $opts) ? ($opts['checkin_link'] ?? false) : null;
+                $payload = ['embeds' => [dms_build_discord_embed($config, $state, $link)]];
             } else {
                 $payload = ['content' => $message];
             }
@@ -809,8 +836,15 @@ function dms_send_webhook($type, $webhook_config, $message, $config = null, $sta
 
         case 'custom':
             curl_setopt($ch, CURLOPT_URL, $webhook_config['url']);
-            $body = $webhook_config['body_template'] ?: $message;
+            // GET stays a bare ping: no body is built or sent
             if ($webhook_config['method'] === 'POST') {
+                $tpl = trim((string)($webhook_config['body_template'] ?? ''));
+                if ($tpl !== '' && $config && $state) {
+                    $body = dms_render_template($tpl, $config, $state, $opts + ['message' => $message, 'escape' => 'json']);
+                    if (preg_match('/^\s*[\[{]/', $tpl) && json_decode($body) === null) dms_log('Custom webhook body is not valid JSON after rendering', 'WARN');
+                } else {
+                    $body = $tpl !== '' ? $tpl : $message;
+                }
                 curl_setopt($ch, CURLOPT_POST, true);
                 curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
                 curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
@@ -846,20 +880,24 @@ function dms_test_webhook($config, $type) {
     $state = dms_load_state();
     $message = "Dead Man's Switch test notification. If you see this, your webhook is configured correctly.";
 
-    $result = dms_send_webhook($type, $webhooks[$type], $message, $config, $state);
+    $link = dms_make_checkin_link($config, $state);   // one token per test, like notify.sh
+    $result = dms_send_webhook($type, $webhooks[$type], $message, $config, $state, ['checkin_link' => $link]);
     dms_log("Test webhook sent: $type - " . ($result['success'] ? 'OK' : 'FAILED: ' . $result['message']));
     return $result;
 }
 
 // Plain-text message to every enabled webhook (no retries); records the
-// outcome in state as last_notify_failure
-function dms_broadcast_plain($config, $msg) {
+// outcome in state as last_notify_failure. Discord gets plain text; a custom
+// POST body template is rendered with {{message}} = $msg. A missing state.json
+// is not loaded (loading would recreate it as a fresh, disarmed one).
+function dms_broadcast_plain($config, $msg, $state = null) {
+    if ($state === null && file_exists(DMS_STATE_FILE)) $state = dms_load_state();
     $enabled = 0;
     $sent = 0;
     foreach (($config['webhooks'] ?? []) as $type => $wh) {
         if (empty($wh['enabled'])) continue;
         $enabled++;
-        $r = dms_send_webhook($type, $wh, $msg);
+        $r = dms_send_webhook($type, $wh, $msg, $config, $state, ['plain' => true]);
         if ($r['success']) $sent++;
         else dms_log("Plain broadcast via $type failed: {$r['message']}", 'WARN');
     }
@@ -881,6 +919,19 @@ function dms_record_notify_outcome($enabled, $sent) {
         elseif ($s['last_notify_failure'] === null) $s['last_notify_failure'] = date('c');
         return $s;
     });
+}
+
+// Is the External API URL really the DMS external API (port 3801)? Never
+// called from the send path: only on save_config and once per boot from cron.
+// 'ok' | 'unreachable' (DNS/connect/timeout: common hairpin-NAT case) | 'wrong_service' (answered, not the DMS API)
+function dms_probe_external_url($url, &$http_code = null) {
+    $ch = curl_init(rtrim($url, '/') . '/?action=health');
+    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5, CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 3]);
+    $body = curl_exec($ch); $code = curl_getinfo($ch, CURLINFO_HTTP_CODE); $err = curl_errno($ch); curl_close($ch);
+    $http_code = $code;
+    if ($body === false || $err !== 0 || $code === 0) return 'unreachable';
+    $j = json_decode((string)$body, true);
+    return ($code === 200 && is_array($j) && ($j['status'] ?? null) === 'ok') ? 'ok' : 'wrong_service';
 }
 
 function dms_send_uptime_kuma_heartbeat($config, $state) {
